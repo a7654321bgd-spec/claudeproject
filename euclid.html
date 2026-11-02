@@ -1,0 +1,593 @@
+<title>Евклидовы ритмы</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geologica:wght@500;700;800&family=Literata:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: the rhythm wheel stays in view on the left while notes, presets, voices and the algorithm trace scroll on the right; one column on phones. */
+:root {
+  --paper: #eceee7;
+  --surface: #f7f8f3;
+  --ink: #1c2130;
+  --muted: #5a6170;
+  --line: #ccd0c4;
+  --v1: #b5620c;
+  --v2: #20756a;
+  --v3: #7a3d94;
+  --f-display: "Geologica", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Literata", Georgia, "Times New Roman", serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #12151c; --surface: #1a1e28; --ink: #e9ebe4; --muted: #9ba2ae; --line: #2d3342;
+    --v1: #f1a547; --v2: #4cc2ad; --v3: #c193dc;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #12151c; --surface: #1a1e28; --ink: #e9ebe4; --muted: #9ba2ae; --line: #2d3342;
+  --v1: #f1a547; --v2: #4cc2ad; --v3: #c193dc;
+  color-scheme: dark;
+}
+body { background: var(--paper); color: var(--ink); font: 400 16px/1.6 var(--f-body); }
+
+.wrap {
+  box-sizing: border-box; max-width: 1200px; margin: 0 auto;
+  padding-block: 32px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto auto 1fr;
+  grid-template-areas: "stage head" "stage story" "stage presets" "stage voices" "stage trace" "stage why";
+  column-gap: 56px; row-gap: 40px; align-items: start;
+}
+section, header { min-width: 0; }
+
+.stage {
+  grid-area: stage; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px);
+  display: flex; flex-direction: column; align-items: center; gap: 18px;
+}
+.wheel { width: 100%; max-width: 560px; }
+.wheel canvas { display: block; width: 100%; max-width: 100%; height: auto; aspect-ratio: 1; }
+
+.head { grid-area: head; display: flex; flex-direction: column; gap: 14px; }
+.story { grid-area: story; display: flex; flex-direction: column; gap: 14px; margin-top: -24px; }
+.story p { margin: 0; max-width: 62ch; }
+.eyebrow { margin: 0; font: 500 12px/1.4 var(--f-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+h1 { margin: 0; font: 800 clamp(38px, 6.2vw, 64px)/0.98 var(--f-display); letter-spacing: -0.025em; text-wrap: balance; }
+h2 { margin: 0; font: 700 21px/1.2 var(--f-display); letter-spacing: -0.01em; text-wrap: balance; }
+.head p { margin: 0; max-width: 62ch; }
+.lede { font-size: 18px; }
+.dim { color: var(--muted); margin: 0; max-width: 62ch; }
+code { font-family: var(--f-mono); font-size: .9em; white-space: nowrap; }
+
+button { font: 500 15px var(--f-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 9px 16px; cursor: pointer; }
+button:hover { border-color: var(--muted); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--v1); outline-offset: 2px; }
+button.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); font: 700 15px var(--f-display); min-width: 7.5em; }
+
+.transport { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px 18px; }
+.speed { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 10px; }
+.speed label { font-size: 14px; color: var(--muted); }
+.speed input { width: 150px; accent-color: var(--v1); }
+.speed output { font: 13px var(--f-mono); color: var(--muted); min-width: 15ch; font-variant-numeric: tabular-nums; }
+
+.presets-sec, .voices-sec, .trace, .why { display: flex; flex-direction: column; gap: 14px; }
+.presets-sec { grid-area: presets; }
+.voices-sec { grid-area: voices; }
+.trace { grid-area: trace; }
+.why { grid-area: why; border-top: 1px solid var(--line); padding-top: 24px; }
+.why p { margin: 0; max-width: 62ch; }
+
+.presets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.preset {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left;
+  padding: 10px 14px; border-radius: 10px; background: var(--surface); color: var(--ink);
+}
+.preset[aria-pressed="true"] { border-color: var(--v1); box-shadow: inset 0 0 0 1px var(--v1); }
+.p-name { font: 700 15px/1.3 var(--f-display); }
+.p-meta { font: 400 13px/1.4 var(--f-body); color: var(--muted); }
+.p-meta span { font: 400 12px var(--f-mono); }
+.preset-note { margin: 0; color: var(--muted); max-width: 62ch; }
+
+.voice { --vc: var(--v1); display: flex; flex-direction: column; gap: 10px; padding-block: 14px; border-top: 1px solid var(--line); }
+.voice-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.voice-name {
+  display: inline-flex; align-items: center; gap: 9px; padding: 4px 2px; border: 0; border-radius: 6px; background: none;
+  font: 700 17px var(--f-display); color: var(--ink); text-decoration: underline transparent 2px; text-underline-offset: 5px;
+}
+.voice-name::before { content: ""; width: 12px; height: 12px; border-radius: 50%; background: var(--vc); }
+.voice-name[aria-pressed="true"] { text-decoration-color: var(--vc); }
+.voice-inst { font-size: 14px; color: var(--muted); }
+.formula { margin-left: auto; font: 13px var(--f-mono); color: var(--muted); }
+.mute { font-size: 13px; padding: 5px 12px; }
+.steppers { display: grid; grid-template-columns: repeat(3, max-content); gap: 8px clamp(14px, 4vw, 32px); }
+.stepper { display: grid; grid-template-columns: auto auto auto; align-items: center; gap: 2px 6px; }
+.stepper .lbl { grid-column: 1 / -1; font-size: 13px; color: var(--muted); }
+.stepper button { width: 36px; height: 36px; padding: 0; border-radius: 9px; font: 600 17px var(--f-mono); }
+.stepper output { min-width: 2.2ch; text-align: center; font: 600 15px var(--f-mono); font-variant-numeric: tabular-nums; }
+.pattern { display: flex; flex-wrap: wrap; gap: 2px 3px; font: 16px/1.5 var(--f-mono); }
+.pattern span { width: 1.25em; text-align: center; color: var(--muted); border-bottom: 2px solid transparent; }
+.pattern span.on { color: var(--ink); font-weight: 600; }
+.pattern span.now { border-bottom-color: var(--vc); }
+.voice.muted .pattern, .voice.muted .steppers, .voice.muted .voice-name::before { opacity: .45; }
+
+.trace { --tc: var(--v1); }
+.trace-for { margin: 0; }
+.trace ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.trace li { display: flex; flex-direction: column; gap: 6px; }
+.t-label { font-size: 14px; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip { font: 13px/1.5 var(--f-mono); letter-spacing: .12em; padding: 2px 7px; border-radius: 6px; }
+.chip.a { background: color-mix(in srgb, var(--tc) 16%, var(--surface)); border: 1px solid color-mix(in srgb, var(--tc) 50%, var(--surface)); }
+.chip.b { border: 1px dashed var(--muted); color: var(--muted); }
+.trace-result { margin: 0; }
+.trace-result code { white-space: normal; overflow-wrap: anywhere; font-size: 15px; }
+
+@media (max-width: 880px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "head" "stage" "story" "presets" "voices" "trace" "why"; row-gap: 32px; }
+  .stage { position: static; }
+  .story { margin-top: 0; }
+}
+@media (max-width: 380px) {
+  .presets { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+
+<main class="wrap">
+  <header class="head">
+    <p class="eyebrow">Алгоритм Евклида · около 300&nbsp;г. до&nbsp;н.&nbsp;э.</p>
+    <h1>Евклидовы ритмы</h1>
+    <p class="lede">Возьмите 8 долей и 3 удара и расставьте удары как можно ровнее. Получится <code>x · · x · · x ·</code>, кубинский тресильо. Его слышно от сальсы до регетона и современной поп-музыки.</p>
+  </header>
+
+  <section class="story">
+    <p>В начале 2000-х инженер Эрик Бьорклунд придумал способ как можно равномернее раскладывать импульсы в системе синхронизации нейтронного источника SNS. По сути это алгоритм Евклида для поиска общего делителя. В 2005 году исследователь Годфрид Туссен заметил, что тот же алгоритм выдаёт традиционные ритмы со всего мира.</p>
+    <p class="dim">Многие из них совпадают с евклидовыми с точностью до сдвига: узор тот же, только счёт начинается с другой доли. Все три круга проходят за одно и то же время, поэтому разное число долей даёт полиритм.</p>
+  </section>
+
+  <section class="stage" aria-label="Ритмическое колесо">
+    <div class="wheel"><canvas id="cv" width="560" height="560" role="img" aria-label="Ритмическое колесо"></canvas></div>
+    <div class="transport">
+      <button class="primary" id="play" type="button" aria-pressed="false">Играть</button>
+      <div class="speed">
+        <label for="speed">Скорость</label>
+        <input id="speed" type="range" min="0.8" max="4" step="0.1" value="2.2">
+        <output id="speed-out" for="speed">1 круг за 2,2 с</output>
+      </div>
+      <button id="random" type="button">Случайный ритм</button>
+    </div>
+  </section>
+
+  <section class="presets-sec" aria-labelledby="presets-h">
+    <h2 id="presets-h">Ритмы мира</h2>
+    <div class="presets" id="presets"></div>
+    <p class="preset-note" id="preset-note"></p>
+  </section>
+
+  <section class="voices-sec" aria-labelledby="voices-h">
+    <h2 id="voices-h">Голоса</h2>
+    <p class="dim">x — удар, · — пауза. Меняйте число ударов, долей и сдвиг, и алгоритм сразу расставит удары как можно ровнее. Нажмите на название голоса, чтобы увидеть его разбор ниже.</p>
+    <div id="voices"></div>
+  </section>
+
+  <section class="trace" id="trace" aria-labelledby="trace-h">
+    <h2 id="trace-h">Как алгоритм раскладывает удары</h2>
+    <p class="dim">Сначала каждый удар стоит отдельной группой, а паузы лежат в остатке. На каждом шаге к группам по одной приклеиваются группы из остатка. То, что не нашло пары, становится новым остатком. Когда в остатке одна группа или ни одной, всё склеивается подряд.</p>
+    <p class="trace-for" id="trace-for"></p>
+    <ol id="trace-list"></ol>
+    <p class="trace-result" id="trace-result"></p>
+    <p class="dim" id="trace-euclid"></p>
+  </section>
+
+  <section class="why" aria-labelledby="why-h">
+    <h2 id="why-h">Почему я это выбрал</h2>
+    <p>Мне нравится, когда одна идея всплывает в совсем разных местах. Деление из «Начал» Евклида, электроника ускорителя и колокол ансамбля в Гане оказываются одним и тем же алгоритмом. И это можно не только прочитать, но и услышать.</p>
+  </section>
+</main>
+
+<script>
+(() => {
+  const TAU = Math.PI * 2;
+  const $ = id => document.getElementById(id);
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const plural = (n, f) => { const a = Math.abs(n) % 100, b = a % 10; return a > 10 && a < 20 ? f[2] : b > 1 && b < 5 ? f[1] : b === 1 ? f[0] : f[2]; };
+  const fmt = p => p.map(x => x ? 'x' : '·').join(' ');
+
+  // Bjorklund's algorithm, keeping every intermediate step for the trace.
+  function bjorklund(k, n) {
+    const steps = [];
+    if (k <= 0) return { steps, out: Array(n).fill(0) };
+    if (k >= n) return { steps, out: Array(n).fill(1) };
+    let a = Array.from({ length: k }, () => [1]);
+    let b = Array.from({ length: n - k }, () => [0]);
+    steps.push({ a, b });
+    while (b.length > 1) {
+      const m = Math.min(a.length, b.length);
+      const na = [];
+      for (let i = 0; i < m; i++) na.push(a[i].concat(b[i]));
+      b = a.length > m ? a.slice(m) : b.slice(m);
+      a = na;
+      steps.push({ a, b });
+    }
+    return { steps, out: a.concat(b).flat() };
+  }
+  const pattern = v => { const base = bjorklund(v.k, v.n).out; return base.map((_, i) => base[(i + v.r) % v.n]); };
+
+  // [k, n, rotation] for lead, pulse and bass; cycle is seconds per revolution.
+  const PRESETS = [
+    { id: 'tresillo', name: 'Тресильо', origin: 'Куба', cycle: 2.2, v: [[3, 8, 0], [8, 8, 0], [2, 8, 0]],
+      note: 'Счёт 3 + 3 + 2. Из Кубы этот рисунок разошёлся по сальсе, регетону, рок-н-роллу и поп-музыке.' },
+    { id: 'cinquillo', name: 'Синкильо', origin: 'Куба', cycle: 2.2, v: [[5, 8, 0], [8, 8, 0], [2, 8, 0]],
+      note: 'Тресильо с двумя добавленными ударами. Основа кубинского дансона.' },
+    { id: 'ruchenitsa', name: 'Рученица', origin: 'Болгария', cycle: 1.2, v: [[3, 7, 0], [7, 7, 0], [1, 7, 0]],
+      note: 'Быстрый народный танец в размере 7/8 со счётом 2 + 2 + 3.' },
+    { id: 'aksak', name: 'Аксак', origin: 'Турция', cycle: 1.8, v: [[4, 9, 0], [9, 9, 0], [1, 9, 0]],
+      note: 'Aksak по-турецки значит «хромой». Размер 9/8, счёт 2 + 2 + 2 + 3: последняя доля длиннее, и ритм будто прихрамывает.' },
+    { id: 'khafif', name: 'Хафиф-е рамаль', origin: 'Персия, XIII век', cycle: 1.5, v: [[2, 5, 0], [5, 5, 0], [1, 5, 0]],
+      note: 'Ритм из персидской музыкальной теории XIII века. Пять долей со счётом 2 + 3.' },
+    { id: 'ashanti', name: 'Колокол ашанти', origin: 'Гана', cycle: 2.2, v: [[7, 12, 3], [12, 12, 0], [4, 12, 0]],
+      note: 'Партия железного колокола, на которую опираются барабаны ансамбля. Евклидов ритм E(7,12), сдвинутый на 3 доли.' },
+    { id: 'venda', name: 'Хлопки венда', origin: 'ЮАР', cycle: 2.2, v: [[5, 12, 0], [12, 12, 0], [4, 12, 0]],
+      note: 'Рисунок хлопков у народа венда на севере ЮАР.' },
+    { id: 'samba', name: 'Самба', origin: 'Бразилия', cycle: 2.4, v: [[7, 16, 0], [16, 16, 0], [2, 16, 4]],
+      note: 'Туссен называет такие узоры ожерельями: 7 бусин на 16 местах. Бас отмечает вторую и четвёртую четверти, как сурдо.' },
+    { id: 'bossa', name: 'Босса-нова', origin: 'Бразилия', cycle: 2.2, v: [[5, 16, 6], [8, 16, 0], [2, 16, 0]],
+      note: 'Клаве босса-новы со счётом 3 + 3 + 4 + 3 + 3. Это E(5,16), сдвинутый на 6 долей.' },
+    { id: 'poly', name: 'Три против четырёх', origin: 'полиритм', cycle: 2.0, v: [[3, 3, 0], [12, 12, 0], [4, 4, 0]],
+      note: 'Треугольник и квадрат вписаны в один круг и проходят его за одно время. Шейкер отбивает их общую сетку из 12 долей.' },
+  ];
+
+  const voices = [
+    { id: 'lead', name: 'Ритм', inst: 'колокол', color: '--v1', k: 3, n: 8, r: 0, mute: false, m: 0, pat: [], curIdx: -1 },
+    { id: 'pulse', name: 'Пульс', inst: 'шейкер', color: '--v2', k: 8, n: 8, r: 0, mute: false, m: 0, pat: [], curIdx: -1 },
+    { id: 'bass', name: 'Бас', inst: 'барабан', color: '--v3', k: 2, n: 8, r: 0, mute: false, m: 0, pat: [], curIdx: -1 },
+  ];
+  let activePreset = null, traceVoice = voices[0];
+
+  // ---------- audio ----------
+  let ac = null, master = null, noiseBuf = null;
+  function initAudio() {
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    const comp = ac.createDynamicsCompressor();
+    master = ac.createGain(); master.gain.value = 0.8;
+    master.connect(comp).connect(ac.destination);
+    noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function env(g, t, peak, dur) {
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(peak, t + 0.003);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  }
+  const SYNTH = {
+    lead(t) {
+      const g = ac.createGain(); env(g, t, 0.3, 0.22); g.connect(master);
+      for (const [f, a] of [[1150, 1], [1720, 0.45], [2840, 0.2]]) {
+        const o = ac.createOscillator(), og = ac.createGain();
+        o.frequency.value = f; og.gain.value = a;
+        o.connect(og).connect(g); o.start(t); o.stop(t + 0.25);
+      }
+    },
+    pulse(t) {
+      const s = ac.createBufferSource(); s.buffer = noiseBuf;
+      const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 6500;
+      const g = ac.createGain(); env(g, t, 0.13, 0.055);
+      s.connect(hp).connect(g).connect(master); s.start(t, Math.random() * 0.8); s.stop(t + 0.07);
+    },
+    bass(t) {
+      const o = ac.createOscillator();
+      o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(46, t + 0.28);
+      const g = ac.createGain(); env(g, t, 0.9, 0.42);
+      o.connect(g).connect(master); o.start(t); o.stop(t + 0.45);
+    },
+  };
+
+  // ---------- clock ----------
+  // Every voice walks the same cycle of length T; step m of a voice sits at phase m / n.
+  const LOOK = 0.15;
+  let playing = false, timer = 0, cycleStart = 0, schedUntil = 0, T = 2.2, hits = [];
+  function schedule() {
+    const now = ac.currentTime, until = now + LOOK;
+    for (const v of voices) {
+      for (;;) {
+        const t = cycleStart + (v.m / v.n) * T;
+        if (t >= until) break;
+        const i = v.m % v.n;
+        if (v.pat[i] && t > now - 0.05) {
+          if (!v.mute) SYNTH[v.id](t);
+          hits.push({ v, i, t });
+        }
+        v.m++;
+      }
+    }
+    schedUntil = until;
+  }
+  function restartCycle() {
+    cycleStart = ac.currentTime + 0.06; schedUntil = cycleStart; hits = [];
+    voices.forEach(v => { v.m = 0; });
+  }
+  function resyncVoice(v) {
+    if (!playing) return;
+    v.m = Math.ceil(((schedUntil - cycleStart) / T) * v.n - 1e-9);
+    hits = hits.filter(h => h.v !== v);
+  }
+  function setCycle(sec) {
+    sec = Math.round(sec * 10) / 10;
+    if (playing) { const now = ac.currentTime, ph = (now - cycleStart) / T; cycleStart = now - ph * sec; }
+    T = sec;
+    $('speed').value = sec;
+    $('speed-out').textContent = `1 круг за ${sec.toFixed(1).replace('.', ',')} с`;
+  }
+
+  $('play').addEventListener('click', async () => {
+    const btn = $('play');
+    if (playing) {
+      playing = false; clearInterval(timer);
+      btn.textContent = 'Играть'; btn.setAttribute('aria-pressed', 'false');
+      voices.forEach(v => updateNow(v, -1));
+      requestDraw();
+      return;
+    }
+    try {
+      if (!ac) initAudio();
+      await ac.resume();
+    } catch (e) {
+      btn.textContent = 'Звук недоступен';
+      return;
+    }
+    restartCycle();
+    playing = true;
+    btn.textContent = 'Стоп'; btn.setAttribute('aria-pressed', 'true');
+    schedule(); timer = setInterval(schedule, 25);
+    requestDraw();
+  });
+  $('speed').addEventListener('input', e => setCycle(+e.target.value));
+
+  // ---------- UI ----------
+  $('presets').innerHTML = PRESETS.map(p => `
+    <button type="button" class="preset" id="pr-${p.id}" data-id="${p.id}" aria-pressed="false">
+      <span class="p-name">${p.name}</span>
+      <span class="p-meta">${p.origin} · <span>E(${p.v[0][0]},${p.v[0][1]})</span></span>
+    </button>`).join('');
+  $('presets').addEventListener('click', e => {
+    const b = e.target.closest('.preset'); if (!b) return;
+    applyPreset(PRESETS.find(p => p.id === b.dataset.id));
+  });
+
+  const FIELDS = [['k', 'Удары'], ['n', 'Доли'], ['r', 'Сдвиг']];
+  $('voices').innerHTML = voices.map(v => `
+    <div class="voice" id="voice-${v.id}" style="--vc: var(${v.color})">
+      <div class="voice-head">
+        <button class="voice-name" type="button" id="name-${v.id}" data-act="trace" data-v="${v.id}" aria-pressed="false">${v.name}</button>
+        <span class="voice-inst">${v.inst}</span>
+        <span class="formula" id="f-${v.id}"></span>
+        <button class="mute" type="button" id="mute-${v.id}" data-act="mute" data-v="${v.id}" aria-pressed="false">Заглушить</button>
+      </div>
+      <div class="steppers">
+        ${FIELDS.map(([f, l]) => `
+          <div class="stepper">
+            <span class="lbl" id="l-${v.id}-${f}">${l}</span>
+            <button type="button" id="dec-${v.id}-${f}" data-act="step" data-v="${v.id}" data-f="${f}" data-d="-1" aria-label="${l}: меньше">−</button>
+            <output id="o-${v.id}-${f}" aria-labelledby="l-${v.id}-${f}"></output>
+            <button type="button" id="inc-${v.id}-${f}" data-act="step" data-v="${v.id}" data-f="${f}" data-d="1" aria-label="${l}: больше">+</button>
+          </div>`).join('')}
+      </div>
+      <div class="pattern" id="p-${v.id}" role="img"></div>
+    </div>`).join('');
+
+  $('voices').addEventListener('click', e => {
+    const btn = e.target.closest('button[data-act]'); if (!btn) return;
+    const v = voices.find(x => x.id === btn.dataset.v);
+    const act = btn.dataset.act;
+    if (act === 'mute') { v.mute = !v.mute; renderVoice(v); requestDraw(); return; }
+    if (act === 'trace') { traceVoice = v; voices.forEach(renderVoice); renderTrace(); return; }
+    const d = +btn.dataset.d, f = btn.dataset.f;
+    if (f === 'k') v.k = Math.max(0, Math.min(v.n, v.k + d));
+    if (f === 'n') {
+      const nn = Math.max(1, Math.min(32, v.n + d));
+      if (nn !== v.n) { v.n = nn; v.k = Math.min(v.k, nn); v.r %= nn; resyncVoice(v); }
+    }
+    if (f === 'r') v.r = (v.r + d + v.n) % v.n;
+    activePreset = null; traceVoice = v;
+    refreshAll();
+  });
+
+  $('random').addEventListener('click', () => {
+    const n = 5 + Math.floor(Math.random() * 12);
+    const k = 2 + Math.floor(Math.random() * (n - 3));
+    Object.assign(voices[0], { n, k, r: Math.floor(Math.random() * n) });
+    Object.assign(voices[1], { n, k: n, r: 0 });
+    Object.assign(voices[2], { n, k: 1 + Math.floor(Math.random() * Math.max(1, Math.floor(n / 4))), r: 0 });
+    if (playing) restartCycle();
+    activePreset = null; traceVoice = voices[0];
+    refreshAll();
+  });
+
+  function applyPreset(p) {
+    p.v.forEach(([k, n, r], i) => Object.assign(voices[i], { k, n, r }));
+    setCycle(p.cycle);
+    if (playing) restartCycle();
+    activePreset = p; traceVoice = voices[0];
+    refreshAll();
+  }
+
+  function renderVoice(v) {
+    $('o-' + v.id + '-k').textContent = v.k;
+    $('o-' + v.id + '-n').textContent = v.n;
+    $('o-' + v.id + '-r').textContent = v.r;
+    $('f-' + v.id).textContent = `E(${v.k},${v.n})` + (v.r ? `, сдвиг ${v.r}` : '');
+    const mb = $('mute-' + v.id);
+    mb.textContent = v.mute ? 'Включить' : 'Заглушить';
+    mb.setAttribute('aria-pressed', String(v.mute));
+    $('voice-' + v.id).classList.toggle('muted', v.mute);
+    $('name-' + v.id).setAttribute('aria-pressed', String(traceVoice === v));
+    const pEl = $('p-' + v.id);
+    pEl.innerHTML = v.pat.map(x => `<span class="${x ? 'on' : ''}">${x ? 'x' : '·'}</span>`).join('');
+    const on = v.pat.map((x, i) => x ? i + 1 : 0).filter(Boolean);
+    pEl.setAttribute('aria-label', on.length
+      ? `Удары на долях ${on.join(', ')} из ${v.n}`
+      : `Тишина на ${v.n} ${plural(v.n, ['долю', 'доли', 'долей'])}`);
+    v.curIdx = -1;
+  }
+
+  function renderTrace() {
+    const v = traceVoice, { steps, out } = bjorklund(v.k, v.n);
+    $('trace').style.setProperty('--tc', `var(${v.color})`);
+    $('trace-for').innerHTML = `Сейчас разобран голос <b>${v.name}</b>: ${v.k} ${plural(v.k, ['удар', 'удара', 'ударов'])} на ${v.n} ${plural(v.n, ['долю', 'доли', 'долей'])}.`;
+    const chip = (g, cls) => `<span class="chip ${cls}">${g.map(x => x ? 'x' : '·').join('')}</span>`;
+    let html;
+    if (!steps.length) {
+      html = `<li><span class="t-label">${v.k === 0 ? 'Ударов нет, получается тишина.' : 'Удар на каждой доле, раскладывать нечего.'}</span></li>`;
+    } else {
+      const items = steps.map((s, i) => [i, s]);
+      const show = items.length > 8 ? [...items.slice(0, 3), null, ...items.slice(-2)] : items;
+      html = show.map(item => {
+        if (!item) {
+          const skipped = steps.length - 5;
+          return `<li><span class="t-label">… ещё ${skipped} ${plural(skipped, ['шаг', 'шага', 'шагов'])} …</span></li>`;
+        }
+        const [i, s] = item;
+        const label = i === 0
+          ? `Начало: ${v.k} ${plural(v.k, ['удар', 'удара', 'ударов'])} и ${v.n - v.k} ${plural(v.n - v.k, ['пауза', 'паузы', 'пауз'])}`
+          : `Шаг ${i}: ${s.a.length} ${plural(s.a.length, ['группа', 'группы', 'групп'])} и ${s.b.length} в остатке`;
+        return `<li><span class="t-label">${label}</span><span class="chips">${s.a.map(g => chip(g, 'a')).join('')}${s.b.map(g => chip(g, 'b')).join('')}</span></li>`;
+      }).join('');
+    }
+    $('trace-list').innerHTML = html;
+    let res = steps.length ? `Склеиваем всё подряд: <code>${fmt(out)}</code>` : `<code>${fmt(out)}</code>`;
+    if (v.r) res += `<br>Сдвиг на ${v.r}: <code>${fmt(v.pat)}</code>`;
+    $('trace-result').innerHTML = res;
+    if (steps.length > 1) {
+      const pairs = steps.map(s => `(${s.a.length}, ${s.b.length})`);
+      const chain = pairs.length > 8 ? [...pairs.slice(0, 3), '…', ...pairs.slice(-2)] : pairs;
+      $('trace-euclid').textContent = `Пары чисел по шагам: ${chain.join(' → ')}. Каждый раз из большего числа вычитается меньшее. Именно так Евклид в «Началах» искал общую меру двух чисел.`;
+    } else if (steps.length === 1) {
+      $('trace-euclid').textContent = 'Здесь в остатке сразу не больше одной группы, поэтому шагов нет: группы просто склеиваются.';
+    } else {
+      $('trace-euclid').textContent = '';
+    }
+  }
+
+  function refreshAll() {
+    voices.forEach(v => { v.pat = pattern(v); });
+    voices.forEach(renderVoice);
+    PRESETS.forEach(p => $('pr-' + p.id).setAttribute('aria-pressed', String(activePreset === p)));
+    $('preset-note').textContent = activePreset
+      ? activePreset.note
+      : 'Свой ритм. При любых числах алгоритм расставляет удары как можно ровнее, поэтому многоугольник на круге всегда близок к правильному.';
+    renderTrace();
+    $('cv').setAttribute('aria-label', 'Ритмическое колесо: ' + voices.map(v => `${v.name} E(${v.k},${v.n})${v.r ? ' со сдвигом ' + v.r : ''}`).join(', '));
+    requestDraw();
+  }
+
+  function updateNow(v, cur) {
+    if (v.curIdx === cur) return;
+    const spans = $('p-' + v.id).children;
+    if (v.curIdx >= 0 && spans[v.curIdx]) spans[v.curIdx].classList.remove('now');
+    if (cur >= 0 && spans[cur]) spans[cur].classList.add('now');
+    v.curIdx = cur;
+  }
+
+  // ---------- wheel ----------
+  const cv = $('cv'), ctx = cv.getContext('2d');
+  let S = 0, dpr = 1, rafId = 0;
+  function resize() {
+    S = cv.clientWidth; dpr = Math.min(2, window.devicePixelRatio || 1);
+    cv.width = Math.round(S * dpr); cv.height = Math.round(S * dpr);
+    requestDraw();
+  }
+  function requestDraw() { if (!rafId) rafId = requestAnimationFrame(frame); }
+  function frame() { rafId = 0; draw(); if (playing) requestDraw(); }
+
+  const RADII = [0.43, 0.325, 0.22];
+  function draw() {
+    if (!S) return;
+    const cs = getComputedStyle(document.documentElement);
+    const tok = n => cs.getPropertyValue(n).trim();
+    const ink = tok('--ink'), muted = tok('--muted'), line = tok('--line'), paper = tok('--paper');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, S, S);
+    const c = S / 2;
+    const now = playing ? ac.currentTime : 0;
+    const phase = playing ? ((((now - cycleStart) / T) % 1) + 1) % 1 : 0;
+    const bead = Math.max(4, S * 0.0125), dot = Math.max(1.6, S * 0.0045);
+    const at = (i, n, R) => { const a = -Math.PI / 2 + TAU * i / n; return [c + Math.cos(a) * R, c + Math.sin(a) * R]; };
+    const alpha = v => v.mute ? 0.3 : 1;
+
+    // tracks and polygons
+    voices.forEach((v, vi) => {
+      const R = S * RADII[vi], col = tok(v.color);
+      ctx.globalAlpha = alpha(v); ctx.strokeStyle = line; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(c, c, R, 0, TAU); ctx.stroke();
+      const pts = [];
+      v.pat.forEach((x, i) => { if (x) pts.push(at(i, v.n, R)); });
+      if (pts.length > 1) {
+        ctx.beginPath();
+        pts.forEach(([x, y], j) => j ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+        ctx.closePath();
+        ctx.globalAlpha = alpha(v) * 0.1; ctx.fillStyle = col; ctx.fill();
+        ctx.globalAlpha = alpha(v) * 0.85; ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.stroke();
+      }
+    });
+
+    // playhead
+    const pa = -Math.PI / 2 + TAU * phase;
+    ctx.globalAlpha = playing ? 0.55 : 0.18; ctx.strokeStyle = ink; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(c + Math.cos(pa) * S * 0.165, c + Math.sin(pa) * S * 0.165);
+    ctx.lineTo(c + Math.cos(pa) * S * 0.475, c + Math.sin(pa) * S * 0.475);
+    ctx.stroke();
+
+    // beads
+    voices.forEach((v, vi) => {
+      const R = S * RADII[vi], col = tok(v.color);
+      const cur = playing ? Math.floor(phase * v.n) % v.n : -1;
+      ctx.globalAlpha = alpha(v);
+      for (let i = 0; i < v.n; i++) {
+        const [x, y] = at(i, v.n, R);
+        ctx.beginPath();
+        if (v.pat[i]) { ctx.fillStyle = col; ctx.arc(x, y, bead * (i === cur ? 1.35 : 1), 0, TAU); }
+        else { ctx.fillStyle = i === cur ? ink : muted; ctx.arc(x, y, i === cur ? dot * 1.8 : dot, 0, TAU); }
+        ctx.fill();
+      }
+      updateNow(v, cur);
+    });
+
+    // ripples on struck beads
+    if (playing) {
+      hits = hits.filter(h => now - h.t < 0.6);
+      if (!reduce) for (const h of hits) {
+        const dt = now - h.t;
+        if (dt < 0 || dt > 0.45) continue;
+        const [x, y] = at(h.i, h.v.n, S * RADII[voices.indexOf(h.v)]);
+        ctx.globalAlpha = (1 - dt / 0.45) * alpha(h.v) * 0.9;
+        ctx.strokeStyle = tok(h.v.color); ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(x, y, bead * (1.2 + dt * 6), 0, TAU); ctx.stroke();
+      }
+    }
+
+    // centre label
+    ctx.globalAlpha = 1; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+    const lead = voices[0];
+    const title = `E(${lead.k},${lead.n})`;
+    ctx.font = `800 ${Math.round(S * 0.068)}px Geologica, "Segoe UI", system-ui, sans-serif`;
+    ctx.lineWidth = S * 0.02; ctx.strokeStyle = paper; ctx.strokeText(title, c, c - S * 0.016);
+    ctx.fillStyle = ink; ctx.fillText(title, c, c - S * 0.016);
+    const sub = activePreset ? activePreset.name : (lead.r ? `сдвиг ${lead.r}` : 'свой ритм');
+    ctx.font = `400 ${Math.round(S * 0.03)}px Literata, Georgia, serif`;
+    ctx.lineWidth = S * 0.014; ctx.strokeText(sub, c, c + S * 0.046);
+    ctx.fillStyle = muted; ctx.fillText(sub, c, c + S * 0.046);
+  }
+
+  new ResizeObserver(resize).observe(cv);
+  matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', requestDraw);
+  new MutationObserver(requestDraw).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  document.fonts?.ready.then(requestDraw);
+
+  applyPreset(PRESETS[0]);
+})();
+</script>

@@ -1,0 +1,237 @@
+<title>Чашка с физарумом</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a lab bench. The petri dish is the page; notes and controls sit beside it like a lab notebook, stacking under it on phones.
+   Single dark world on purpose: a lightbox bench under a yellow slime mould. */
+:root {
+  --bench: #1d1912;
+  --bench-2: #2a241a;
+  --agar: #3a3020;
+  --slime: #f2c230;
+  --oat: #efe3c4;
+  --ink: #efe8d8;
+  --muted: #aa9f86;
+  --line: #4a3f2b;
+  --f-display: "Unbounded", "Arial Black", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+body { background: var(--bench); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.55; }
+.wrap {
+  max-width: 1100px; margin: 0 auto; box-sizing: border-box;
+  padding-block: 28px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 32px; align-items: start;
+}
+@media (max-width: 820px) { .wrap { grid-template-columns: minmax(0, 1fr); gap: 22px; } }
+.dish-col { display: flex; flex-direction: column; gap: 10px; }
+.dish {
+  position: relative; width: 100%; max-width: 100%; aspect-ratio: 1; border-radius: 50%;
+  background: var(--agar);
+  box-shadow: 0 0 0 6px var(--bench-2), 0 0 0 7px var(--line), 0 24px 60px rgba(0,0,0,.45);
+  overflow: hidden; cursor: crosshair; touch-action: none;
+}
+.dish canvas { width: 100%; height: 100%; display: block; image-rendering: auto; }
+.dish::after { content: ""; position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle at 32% 26%, rgba(255,255,255,.10), transparent 38%); }
+.caption { font-family: var(--f-mono); font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+.notes { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.eyebrow { font-family: var(--f-mono); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--slime); margin: 0; }
+h1 { font-family: var(--f-display); font-weight: 700; font-size: clamp(26px, 4.4vw, 40px); line-height: 1.08; margin: 0; text-wrap: balance; }
+.notes p { margin: 0; max-width: 60ch; color: var(--ink); }
+.notes p.dim { color: var(--muted); }
+.panel { display: flex; flex-direction: column; gap: 14px; border-top: 1px solid var(--line); padding-top: 18px; }
+.row { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; }
+.row label { font-size: 14px; }
+.row output { font-family: var(--f-mono); font-size: 13px; color: var(--slime); font-variant-numeric: tabular-nums; }
+.row input { grid-column: 1 / -1; width: 100%; accent-color: var(--slime); }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; }
+button {
+  font: 500 14px var(--f-body); color: var(--ink); background: var(--bench-2);
+  border: 1px solid var(--line); border-radius: 8px; padding: 9px 14px; cursor: pointer;
+}
+button:hover { border-color: var(--slime); }
+button.primary { background: var(--slime); color: var(--bench); border-color: var(--slime); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--slime); outline-offset: 2px; }
+.why { border-left: 2px solid var(--slime); padding-left: 14px; }
+</style>
+
+<div class="wrap">
+  <div class="dish-col">
+    <div class="dish" id="dish"><canvas id="cv" aria-label="Чашка Петри: жёлтая сеть слизевика растёт между хлопьями овсянки"></canvas></div>
+    <div class="caption"><span>Physarum polycephalum · <span id="agents">0</span> агентов</span><span>шаг <span id="step">0</span></span></div>
+  </div>
+
+  <div class="notes">
+    <p class="eyebrow">Лабораторная тетрадь</p>
+    <h1>Чашка с физарумом</h1>
+    <p>Физарум многоголовый — это слизевик, одна огромная клетка без мозга. Он ползёт по агару, ищет еду и оставляет за собой сеть трубок. Лишние трубки отмирают, полезные толстеют.</p>
+    <p>В 2010 году японские учёные разложили овсянку на месте городов вокруг Токио. За сутки слизевик построил сеть, очень похожую на настоящую железную дорогу региона.</p>
+    <p class="dim">Здесь каждый жёлтый пиксель — след тысяч простых агентов. Каждый смотрит чуть влево, прямо и чуть вправо и поворачивает туда, где след гуще. Больше правил нет.</p>
+
+    <div class="panel">
+      <div class="btns">
+        <button class="primary" id="pause" type="button">Пауза</button>
+        <button id="reset" type="button">Новая чашка</button>
+        <button id="clear" type="button">Убрать овсянку</button>
+      </div>
+      <p class="dim">Нажмите на чашку, чтобы положить хлопья овсянки. Слизевик потянется к ним.</p>
+      <div class="row">
+        <label for="sa">Угол «усиков»</label><output id="sa-out" for="sa"></output>
+        <input id="sa" type="range" min="0.1" max="1.4" step="0.05" value="0.4">
+      </div>
+      <div class="row">
+        <label for="sd">Дальность «усиков»</label><output id="sd-out" for="sd"></output>
+        <input id="sd" type="range" min="3" max="30" step="1" value="9">
+      </div>
+      <div class="row">
+        <label for="decay">Сохранение следа</label><output id="decay-out" for="decay"></output>
+        <input id="decay" type="range" min="0.80" max="0.98" step="0.01" value="0.88">
+      </div>
+    </div>
+
+    <p class="why dim">Почему я это выбрал: мне нравится, что сложная и почти «умная» сеть получается из правила в три строчки и у неё нет никакого плана. Мне это близко.</p>
+  </div>
+</div>
+
+<script>
+(() => {
+  const N = 320;                     // trail grid is N×N
+  const R = N / 2 - 3;               // dish radius in cells
+  const AGENTS = 26000;
+  const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+  cv.width = N; cv.height = N;
+  const img = ctx.createImageData(N, N);
+  const px = new Uint32Array(img.data.buffer);
+  let trail = new Float32Array(N * N), tmp = new Float32Array(N * N);
+  const food = new Float32Array(N * N);
+  const ax = new Float32Array(AGENTS), ay = new Float32Array(AGENTS), aa = new Float32Array(AGENTS);
+  const $ = id => document.getElementById(id);
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // colour lookup: agar -> slime -> pale core
+  const hex = n => { const v = getComputedStyle(document.documentElement).getPropertyValue(n).trim().slice(1); return [0, 2, 4].map(i => parseInt(v.slice(i, i + 2), 16)); };
+  const AGAR = hex('--agar'), SLIME = hex('--slime'), OAT = hex('--oat');
+  const LUT = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    const t = i / 255, k = Math.min(1, t * 1.6), w = Math.max(0, (t - 0.7) / 0.3);
+    const c = AGAR.map((a, j) => a + (SLIME[j] - a) * k + (255 - SLIME[j]) * w * 0.55);
+    LUT[i] = 0xff000000 | (Math.round(c[2]) << 16) | (Math.round(c[1]) << 8) | Math.round(c[0]);
+  }
+  // soft exposure curve so dense veins don't all burn out to one flat colour
+  const EXPO = new Uint32Array(1024);
+  for (let i = 0; i < 1024; i++) EXPO[i] = LUT[Math.round(255 * (1 - Math.exp(-i / 40 / 9)))];
+  const OATPX = 0xff000000 | (OAT[2] << 16) | (OAT[1] << 8) | OAT[0];
+  const inDish = (x, y) => (x - N / 2) ** 2 + (y - N / 2) ** 2 < R * R;
+
+  let SA, SD, DECAY;
+  const RA = 0.78, STEP = 1, DEPOSIT = 4.5, DIFFUSE = 0.35, CAP = 24;
+  function readParams() {
+    SA = +$('sa').value; SD = +$('sd').value; DECAY = +$('decay').value;
+    $('sa-out').textContent = Math.round(SA * 180 / Math.PI) + '°';
+    $('sd-out').textContent = SD + ' кл.';
+    $('decay-out').textContent = Math.round(DECAY * 100) + '%';
+  }
+  ['sa', 'sd', 'decay'].forEach(id => $(id).addEventListener('input', readParams));
+  readParams();
+
+  function addOat(cx, cy) {
+    for (let y = -4; y <= 4; y++) for (let x = -4; x <= 4; x++) {
+      if (x * x + y * y > 16) continue;
+      const X = Math.round(cx + x), Y = Math.round(cy + y);
+      if (X >= 0 && Y >= 0 && X < N && Y < N && inDish(X, Y)) food[Y * N + X] = 1;
+    }
+  }
+  function reset() {
+    trail.fill(0); food.fill(0); step = 0;
+    // agents start scattered over the whole dish
+    for (let i = 0; i < AGENTS; i++) {
+      const r = Math.sqrt(Math.random()) * R * 0.95, t = Math.random() * Math.PI * 2;
+      ax[i] = N / 2 + Math.cos(t) * r; ay[i] = N / 2 + Math.sin(t) * r; aa[i] = Math.random() * Math.PI * 2;
+    }
+    for (let k = 0; k < 11; k++) {
+      const r = R * (0.35 + Math.random() * 0.55), t = Math.random() * Math.PI * 2;
+      addOat(N / 2 + Math.cos(t) * r, N / 2 + Math.sin(t) * r);
+    }
+  }
+
+  const sense = (x, y, a) => {
+    const X = (x + Math.cos(a) * SD) | 0, Y = (y + Math.sin(a) * SD) | 0;
+    if (X < 0 || Y < 0 || X >= N || Y >= N) return -1;
+    return trail[Y * N + X];
+  };
+
+  let step = 0;
+  function tick() {
+    for (let i = 0; i < AGENTS; i++) {
+      let x = ax[i], y = ay[i], a = aa[i];
+      const f = sense(x, y, a), l = sense(x, y, a - SA), r = sense(x, y, a + SA);
+      if (f >= l && f >= r) {} else if (l > r) a -= RA; else if (r > l) a += RA; else a += (Math.random() < .5 ? -RA : RA);
+      a += (Math.random() - 0.5) * 0.1;
+      let nx = x + Math.cos(a) * STEP, ny = y + Math.sin(a) * STEP;
+      if (!inDish(nx, ny)) { a = Math.atan2(N / 2 - y, N / 2 - x) + (Math.random() - 0.5) * 1.2; nx = x; ny = y; }
+      ax[i] = nx; ay[i] = ny; aa[i] = a;
+      trail[(ny | 0) * N + (nx | 0)] += DEPOSIT;
+    }
+    // food keeps emitting a strong scent
+    for (let i = 0; i < N * N; i++) if (food[i]) trail[i] += 3;
+    // partial diffuse toward the 3×3 mean, then decay
+    for (let y = 1; y < N - 1; y++) {
+      const o = y * N;
+      for (let x = 1; x < N - 1; x++) {
+        const i = o + x;
+        const s = trail[i - N - 1] + trail[i - N] + trail[i - N + 1] + trail[i - 1] + trail[i] + trail[i + 1] + trail[i + N - 1] + trail[i + N] + trail[i + N + 1];
+        const v = (trail[i] + (s / 9 - trail[i]) * DIFFUSE) * DECAY;
+        tmp[i] = v > CAP ? CAP : v;   // saturation keeps agents from piling into one vein
+      }
+    }
+    const t = trail; trail = tmp; tmp = t;
+    step++;
+  }
+
+  function render() {
+    for (let i = 0; i < N * N; i++) {
+      if (food[i]) { px[i] = OATPX; continue; }
+      px[i] = EXPO[Math.min(1023, trail[i] * 40 | 0)];
+    }
+    ctx.putImageData(img, 0, 0);
+    $('step').textContent = step.toLocaleString('ru-RU');
+  }
+
+  // input
+  const dish = $('dish');
+  function place(e) {
+    const r = dish.getBoundingClientRect();
+    addOat((e.clientX - r.left) / r.width * N, (e.clientY - r.top) / r.height * N);
+    if (paused) render();
+  }
+  let dragging = false;
+  dish.addEventListener('pointerdown', e => { dragging = true; place(e); });
+  dish.addEventListener('pointermove', e => { if (dragging) place(e); });
+  addEventListener('pointerup', () => dragging = false);
+
+  let paused = reduce;
+  const pauseBtn = $('pause');
+  const syncPause = () => pauseBtn.textContent = paused ? 'Запустить' : 'Пауза';
+  pauseBtn.addEventListener('click', () => { paused = !paused; syncPause(); });
+  $('reset').addEventListener('click', () => { reset(); prewarm(); render(); });
+  $('clear').addEventListener('click', () => { food.fill(0); if (paused) render(); });
+  syncPause();
+
+  // a few hundred steps up front so the page opens on a grown network, not a dot
+  function prewarm() { for (let k = 0; k < 260; k++) tick(); }
+
+  $('agents').textContent = AGENTS.toLocaleString('ru-RU');
+  reset(); prewarm(); render();
+  function loop() {
+    if (!paused) { tick(); tick(); render(); }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>

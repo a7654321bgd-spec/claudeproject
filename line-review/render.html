@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Разбор строчек</title>
+<style>html, body { margin: 0; background: #000; } canvas { display: block; }</style>
+</head>
+<body>
+<canvas id="cv" width="1080" height="1920"></canvas>
+<script>
+'use strict';
+// A song's lines reviewed like moves in a chess game: each line pops up as a card with a verdict,
+// an evaluation bar swings with every verdict, the board behind pulses on the beat, and the game ends
+// on a summary with the accuracy and the best move. Data comes from build.js (review.js + the beat grid).
+const W = 1080, H = 1920, FPS = 60, TAU = Math.PI * 2;
+const FONT = '"Inter Display", "Inter", sans-serif';
+const clamp01 = x => x < 0 ? 0 : x > 1 ? 1 : x;
+const easeOut = x => 1 - Math.pow(1 - clamp01(x), 3);
+const easeOutBack = x => { x = clamp01(x); const c = 2.0; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+let D;
+
+function setup(data) {
+  D = data;
+  let ev = 0;
+  D.lines.forEach(l => { ev += D.grades[l.grade].eval; l.evalAfter = ev; });
+  return { FPS, DURATION: D.duration };
+}
+const current = t => { let k = -1; D.lines.forEach((l, i) => { if (l.t <= t) k = i; }); return k; };
+// beat pulse: 1 on the beat, decaying; downbeats count double
+function pulse(t) {
+  const b = (t - D.firstBeat) / D.period;
+  if (b < 0) return 0;
+  const k = Math.floor(b), since = (b - k) * D.period;
+  return Math.exp(-since / 0.09) * (k % 4 === 0 ? 1 : 0.55);
+}
+
+function wrap(text, size, weight, maxW) {
+  ctx.font = `${weight} ${size}px ${FONT}`;
+  const words = text.split(' '), lines = [];
+  let cur = '';
+  for (const w of words) {
+    const tryLine = cur ? cur + ' ' + w : w;
+    if (ctx.measureText(tryLine).width > maxW && cur) { lines.push(cur); cur = w; } else cur = tryLine;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+function text(str, x, y, size, color, weight = 900, align = 'center') {
+  ctx.font = `${weight} ${size}px ${FONT}`; ctx.textAlign = align; ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(4,4,10,0.9)'; ctx.lineWidth = Math.max(6, size * 0.14);
+  ctx.strokeText(str, x, y); ctx.fillStyle = color; ctx.fillText(str, x, y);
+}
+function badge(x, y, r, g) {
+  ctx.fillStyle = g.color; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = r * 0.12; ctx.stroke();
+  ctx.font = `900 ${r * 0.95}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#fff'; ctx.fillText(g.mark, x, y + r * 0.04);
+}
+
+function drawBoard(t, k) {
+  const p = pulse(t);
+  ctx.fillStyle = '#0b0b12'; ctx.fillRect(0, 0, W, H);
+  // a tilted chessboard drifting behind everything, flashing on the beat
+  ctx.save();
+  ctx.translate(W / 2, 1050); ctx.rotate(-0.18 + 0.01 * Math.sin(t * 0.7)); ctx.scale(1 + 0.025 * p, 1 + 0.025 * p);
+  const s = 150, off = (t * 20) % (2 * s);
+  for (let i = -8; i < 8; i++) for (let j = -9; j < 9; j++) {
+    if ((i + j) % 2) continue;
+    ctx.fillStyle = `rgba(120,110,200,${0.05 + 0.05 * p})`;
+    ctx.fillRect(i * s - off, j * s - off, s, s);
+  }
+  ctx.restore();
+  const g = k >= 0 ? D.grades[D.lines[k].grade] : null;
+  if (g) {
+    const age = t - D.lines[k].t;
+    const glow = ctx.createRadialGradient(W / 2, 1000, 50, W / 2, 1000, 900);
+    glow.addColorStop(0, hexA(g.color, 0.22 * Math.exp(-age / 1.2) + 0.08 + 0.08 * p)); glow.addColorStop(1, hexA(g.color, 0));
+    ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+  }
+}
+function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; }
+
+function drawHeader(t) {
+  text('НЕЙРОСЕТЬ РАЗБИРАЕТ', 540, 200, 70, '#ffffff', 900);
+  text('«ДИНАСТИЮ» ПО СТРОЧКАМ', 540, 280, 62, '#ffd36e', 900);
+  text('VILLIAN & madk1d · каждая строчка как ход в шахматах', 540, 352, 32, '#c9c6ee', 700);
+}
+
+// evaluation bar: white = the track, black = the haters
+function drawEval(t, k) {
+  let ev = 0;
+  if (k >= 0) {
+    const l = D.lines[k], prev = k ? D.lines[k - 1].evalAfter : 0;
+    ev = prev + (l.evalAfter - prev) * easeOutBack((t - l.t) / 0.45);
+  }
+  const x = 54, y = 470, w = 56, h = 960;
+  const frac = clamp01(0.5 + Math.tanh(ev / 4) * 0.5);
+  ctx.fillStyle = '#2a2a33'; ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = '#f2f2f2'; ctx.fillRect(x, y + h * (1 - frac), w, h * frac);
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, h);
+  text((ev >= 0 ? '+' : '') + ev.toFixed(1), x + w / 2, y + h + 40, 34, '#ffffff', 900);
+  ctx.save(); ctx.translate(x + w / 2, y - 26); text('трек', 0, 0, 26, '#f2f2f2', 800); ctx.restore();
+  ctx.save(); ctx.translate(x + w / 2, y + h + 80); text('хейтеры', 0, 0, 22, '#9a9aa8', 800); ctx.restore();
+}
+
+function drawCard(t, k) {
+  if (k < 0 || t >= D.summaryAt) return;
+  const l = D.lines[k], g = D.grades[l.grade], age = t - l.t;
+  const pop = easeOutBack(age / 0.35), cx = 590, top = 560;
+  ctx.save(); ctx.translate(cx, top); ctx.scale(0.85 + 0.15 * pop, 0.85 + 0.15 * pop); ctx.globalAlpha = clamp01(age / 0.15);
+  // the line itself
+  const lines = wrap('«' + l.quote + '»', 56, 800, 760), ch = 120 + lines.length * 70;
+  ctx.fillStyle = 'rgba(16,16,26,0.86)'; ctx.beginPath(); ctx.roundRect(-430, 0, 860, ch, 30); ctx.fill();
+  ctx.strokeStyle = hexA(g.color, 0.9); ctx.lineWidth = 5; ctx.stroke();
+  text(`ход ${k + 1}/${D.lines.length} · ${l.part}`, 0, 50, 30, '#a9a7c9', 700);
+  lines.forEach((s, i) => text(s, 0, 120 + i * 70, 56, '#ffffff', 800));
+  ctx.restore();
+  // the verdict, slamming in a beat later
+  const va = age - 0.25;
+  if (va > 0) {
+    const s = easeOutBack(va / 0.3);
+    ctx.font = `900 84px ${FONT}`;
+    const lw = ctx.measureText(g.label).width, total = 128 + 24 + lw;
+    ctx.save(); ctx.translate(cx, top + 440); ctx.scale(s, s); ctx.rotate(-0.04);
+    badge(-total / 2 + 64, 0, 64, g);
+    text(g.label, -total / 2 + 152, -4, 84, g.color, 900, 'left');
+    ctx.restore();
+    ctx.globalAlpha = clamp01((va - 0.2) / 0.3);
+    text(l.note, cx, top + 535, 38, '#dcdaf5', 700);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// the move list: the last few verdicts under the card
+function drawHistory(t, k) {
+  if (t >= D.summaryAt) return;
+  const from = Math.max(0, k - 4);
+  for (let i = from; i < k; i++) {
+    const l = D.lines[i], g = D.grades[l.grade], row = i - from, y = 1190 + row * 62;
+    ctx.globalAlpha = 0.45 + 0.13 * row;
+    badge(190, y, 22, g);
+    ctx.font = `700 30px ${FONT}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#e6e4fa';
+    let q = l.quote; while (ctx.measureText(q).width > 700 && q.length > 10) q = q.slice(0, -2);
+    ctx.fillText(q === l.quote ? q : q + '…', 228, y);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawSummary(t) {
+  const age = t - D.summaryAt;
+  if (age < 0) return;
+  const a = clamp01(age / 0.3);
+  ctx.fillStyle = `rgba(6,6,12,${0.75 * a})`; ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = a;
+  const s = easeOutBack(age / 0.4);
+  ctx.save(); ctx.translate(540, 520); ctx.scale(s, s); text('ПАРТИЯ ОКОНЧЕНА', 0, 0, 92, '#ffffff', 900); ctx.restore();
+  const acc = Math.round(D.lines.reduce((sum, l) => sum + D.grades[l.grade].score, 0) / D.lines.length);
+  const shown = Math.round(acc * easeOut((age - 0.3) / 1.2));
+  text('точность', 540, 640, 40, '#c9c6ee', 700);
+  text(shown + '%', 540, 740, 150, '#26c2b8', 900);
+  const order = ['brilliant', 'best', 'excellent', 'good', 'inaccuracy', 'mistake'];
+  order.forEach((key, i) => {
+    const g = D.grades[key], n = D.lines.filter(l => l.grade === key).length, y = 900 + i * 74;
+    ctx.globalAlpha = a * clamp01((age - 0.5 - i * 0.12) / 0.25);
+    badge(330, y, 26, g);
+    ctx.font = `800 40px ${FONT}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff';
+    ctx.fillText(g.label, 380, y); ctx.textAlign = 'right'; ctx.fillText(String(n), 760, y);
+  });
+  ctx.globalAlpha = a * clamp01((age - 1.4) / 0.3);
+  const best = D.lines[D.lines.length - 1];
+  text('лучший ход:', 540, 1370, 36, '#26c2b8', 800);
+  wrap('«' + best.quote + '»', 44, 800, 900).forEach((s, i) => text(s, 540, 1430 + i * 54, 44, '#ffffff', 800));
+  ctx.globalAlpha = a * clamp01((age - 2.0) / 0.3);
+  text('Согласен с нейросетью? Пиши в комменты', 540, 1560, 40, '#ffd36e', 800);
+  ctx.globalAlpha = 1;
+}
+
+// ad badge, lower-left (moved up during the summary to stay clear of its text)
+function drawDomino(x, y, w, h) {
+  ctx.fillStyle = '#f5f1e6'; ctx.beginPath(); ctx.roundRect(x, y, w, h, w * 0.24); ctx.fill();
+  ctx.strokeStyle = 'rgba(28,28,38,0.6)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x + 5, y + h / 2); ctx.lineTo(x + w - 5, y + h / 2); ctx.stroke();
+  const s = w * 0.26, r = w * 0.095, cx = x + w / 2;
+  ctx.fillStyle = '#1c1c26';
+  const pips = (cy, list) => list.forEach(([px, py]) => { ctx.beginPath(); ctx.arc(cx + px * s, cy + py * s, r, 0, TAU); ctx.fill(); });
+  pips(y + h / 4, [[-1, -1], [0, 0], [1, 1]]);
+  pips(y + 3 * h / 4, [[-1, -1], [1, -1], [0, 0], [-1, 1], [1, 1]]);
+}
+function drawAd() {
+  if (!D.ad) return;
+  const x = 150, pad = 18, icon = 30, gap = 16, label1 = 'РЕКЛАМА · TELEGRAM-БОТ';
+  ctx.font = `700 14px ${FONT}`; const lw = ctx.measureText(label1).width + 20;
+  ctx.font = `900 34px ${FONT}`; const tw = ctx.measureText(D.ad.title).width;
+  ctx.font = `800 22px ${FONT}`; const sw = ctx.measureText(D.ad.sub).width;
+  const w = pad * 2 + icon + gap + Math.max(lw, tw, sw), h = 96, y = 1470;
+  ctx.fillStyle = 'rgba(10,10,22,0.85)'; ctx.beginPath(); ctx.roundRect(x, y, w, h, 16); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1.5; ctx.stroke();
+  drawDomino(x + pad, y + (h - 54) / 2, icon, 54);
+  const tx = x + pad + icon + gap;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.font = `700 14px ${FONT}`; ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.fillText(label1, tx, y + 25);
+  ctx.font = `900 34px ${FONT}`; ctx.fillStyle = '#ffffff'; ctx.fillText(D.ad.title, tx, y + 60);
+  ctx.font = `800 22px ${FONT}`; ctx.fillStyle = '#5ec2ff'; ctx.fillText(D.ad.sub, tx, y + 86);
+}
+
+function drawFrame(t) {
+  const k = current(t);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  drawBoard(t, k);
+  drawHeader(t);
+  drawEval(t, k);
+  drawCard(t, k);
+  drawHistory(t, k);
+  drawSummary(t);
+  if (t < D.summaryAt) drawAd();
+  // a quick flash when a brilliant move lands
+  if (k >= 0 && D.lines[k].grade === 'brilliant') {
+    const va = t - D.lines[k].t - 0.25;
+    if (va > 0 && va < 0.25) { ctx.fillStyle = `rgba(38,194,184,${0.25 * (1 - va / 0.25)})`; ctx.fillRect(0, 0, W, H); }
+  }
+}
+
+window.setup = setup;
+window.frameJPEG = t => { drawFrame(t); return cv.toDataURL('image/jpeg', 0.92).split(',')[1]; };
+window.framePNG = t => { drawFrame(t); return cv.toDataURL('image/png').split(',')[1]; };
+window.ready = document.fonts.load(`900 100px ${FONT}`).then(() => document.fonts.load(`800 50px ${FONT}`))
+  .then(() => ({ font: document.fonts.check(`900 100px "Inter Display"`) }));
+</script>
+</body>
+</html>

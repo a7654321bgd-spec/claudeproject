@@ -1,0 +1,5 @@
+preview/
+*.wav
+*.mp3
+# carries the copyrighted track
+*.mp4

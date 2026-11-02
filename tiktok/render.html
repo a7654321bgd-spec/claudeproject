@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Евклидовы ритмы, рендер ролика</title>
+<style>html, body { margin: 0; background: #000; } canvas { display: block; }</style>
+</head>
+<body>
+<canvas id="cv" width="1080" height="1920"></canvas>
+<script>
+// Vertical 1080×1920 video, drawn frame by frame from a single timeline that the audio uses too.
+const W = 1080, H = 1920, FPS = 30, DURATION = 37.4;
+const CX = 530, CY = 960, R = 300;   // wheel sits left of TikTok's right-hand buttons
+const TAU = Math.PI * 2;
+const FONT = '"Inter Display", "Inter", "DejaVu Sans", sans-serif';
+const MONO = '"JetBrains Mono", "DejaVu Sans Mono", monospace';
+
+function bjorklund(k, n) {
+  if (k <= 0) return Array(n).fill(0);
+  if (k >= n) return Array(n).fill(1);
+  let a = Array.from({ length: k }, () => [1]);
+  let b = Array.from({ length: n - k }, () => [0]);
+  while (b.length > 1) {
+    const m = Math.min(a.length, b.length);
+    const na = [];
+    for (let i = 0; i < m; i++) na.push(a[i].concat(b[i]));
+    b = a.length > m ? a.slice(m) : b.slice(m);
+    a = na;
+  }
+  return a.concat(b).flat();
+}
+const euclid = (k, n, r) => { const b = bjorklund(k, n); return b.map((_, i) => b[(i + r) % n]); };
+
+const RH = {
+  tresillo:  { k: 3, n: 8,  r: 0, T: 2.2, color: '#ffb547', kick: [0, 2, 4, 6],   name: 'тресильо', place: 'Куба',     bell: { f: 1180, d: 0.20 } },
+  cinquillo: { k: 5, n: 8,  r: 0, T: 2.2, color: '#ff6b8a', kick: [0, 2, 4, 6],   name: 'синкильо', place: 'Куба',     bell: { f: 1320, d: 0.18 } },
+  aksak:     { k: 4, n: 9,  r: 0, T: 1.8, color: '#6fc3ff', kick: [0, 6],         name: 'аксак',    place: 'Турция',   bell: { f: 990,  d: 0.22 } },
+  ghana:     { k: 7, n: 12, r: 3, T: 2.2, color: '#a9ec6a', kick: [0, 3, 6, 9],   name: 'колокол',  place: 'Гана',     bell: { f: 880,  d: 0.38 } },
+  samba:     { k: 7, n: 16, r: 0, T: 2.4, color: '#c39bff', kick: [0, 4, 8, 12],  name: 'самба',    place: 'Бразилия', bell: { f: 1560, d: 0.12 } },
+};
+for (const r of Object.values(RH)) r.pat = euclid(r.k, r.n, r.r);
+
+const SCENES = [
+  { t0: 0, t1: 4.4, type: 'groove', rh: 'tresillo', texts: [
+    { t: 0, lines: ['Ты слышал этот ритм', 'сотни раз'] },
+    { t: 2.2, lines: ['А собрать его можно', 'формулой Евклида'], small: 'ей около 2300 лет' } ] },
+  { t0: 4.4, t1: 6.6, type: 'setup', rh: 'tresillo', texts: [
+    { t: 4.4, lines: ['Берём 8 долей', 'и 3 удара'] } ] },
+  { t0: 6.6, t1: 8.8, type: 'place', rh: 'tresillo', texts: [
+    { t: 6.6, lines: ['Расставляем удары', 'как можно ровнее'] } ] },
+  { t0: 8.8, t1: 11.0, type: 'groove', rh: 'tresillo', center: true, pattern: true, continuous: true, texts: [
+    { t: 8.8, lines: ['Это кубинский', 'тресильо'], small: 'его слышно в сальсе, реггетоне и поп-музыке' } ] },
+  { t0: 11.0, t1: 15.4, type: 'groove', rh: 'cinquillo', center: true, pattern: true, texts: [
+    { t: 11.0, lines: ['А если', '5 из 8?'] },
+    { t: 13.2, lines: ['Кубинский', 'синкильо'] } ] },
+  { t0: 15.4, t1: 19.0, type: 'groove', rh: 'aksak', center: true, pattern: true, texts: [
+    { t: 15.4, lines: ['А если', '4 из 9?'] },
+    { t: 17.2, lines: ['Турецкий', 'аксак'], small: '«хромой» ритм: 2 + 2 + 2 + 3' } ] },
+  { t0: 19.0, t1: 23.4, type: 'groove', rh: 'ghana', center: true, pattern: true, texts: [
+    { t: 19.0, lines: ['А если', '7 из 12?'] },
+    { t: 21.2, lines: ['Колокол', 'из Ганы'], small: 'по нему сверяются все барабанщики' } ] },
+  { t0: 23.4, t1: 28.2, type: 'groove', rh: 'samba', center: true, pattern: true, texts: [
+    { t: 23.4, lines: ['А если', '7 из 16?'] },
+    { t: 25.8, lines: ['Бразильская', 'самба'] } ] },
+  { t0: 28.2, t1: 33.0, type: 'grid', accent: '#8fb3ff', texts: [
+    { t: 28.2, lines: ['Везде одна', 'и та же формула'], small: 'алгоритм Евклида, около 300 г. до н. э.' },
+    { t: 30.6, lines: ['Её открыли заново', 'для ускорителя частиц'], small: 'а в 2005 году нашли в музыке всего мира' } ] },
+  { t0: 33.0, t1: DURATION, type: 'groove', rh: 'tresillo', texts: [
+    { t: 33.0, lines: ['Какой ритм', 'твой?'], small: 'напиши в комментариях' } ] },
+];
+const sceneAt = t => SCENES.find(s => t >= s.t0 && t < s.t1) || SCENES[SCENES.length - 1];
+
+// ---------- helpers ----------
+const clamp01 = x => Math.max(0, Math.min(1, x));
+const easeOut = x => 1 - Math.pow(1 - x, 3);
+const easeInOut = x => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+const easeOutBack = x => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+const lerp2 = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
+const angleOf = (i, n) => -Math.PI / 2 + TAU * i / n;
+const ptOn = (i, n, r, cx = CX, cy = CY) => [cx + Math.cos(angleOf(i, n)) * r, cy + Math.sin(angleOf(i, n)) * r];
+function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; }
+// seconds since the playhead last passed step i of a rhythm whose cycle started at t0
+function sinceStep(rh, t0, t, i) { const local = t - t0 - (i / rh.n) * rh.T; return local < 0 ? Infinity : local % rh.T; }
+
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+
+const grain = document.createElement('canvas');
+grain.width = W; grain.height = H;
+{
+  const g = grain.getContext('2d'), id = g.createImageData(W, H);
+  for (let i = 0; i < id.data.length; i += 4) { const v = Math.random() * 255; id.data[i] = id.data[i + 1] = id.data[i + 2] = v; id.data[i + 3] = 9; }
+  g.putImageData(id, 0, 0);
+}
+const bgGrad = ctx.createRadialGradient(CX, CY, 40, CX, CY, 1250);
+bgGrad.addColorStop(0, '#1b1f3b'); bgGrad.addColorStop(0.55, '#0f1224'); bgGrad.addColorStop(1, '#06070d');
+
+// ---------- drawing primitives ----------
+function circle(x, y, r) { ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); }
+function drawTrack(cx = CX, cy = CY, r = R, lw = 3) { ctx.strokeStyle = 'rgba(255,255,255,0.14)'; ctx.lineWidth = lw; circle(cx, cy, r); ctx.stroke(); }
+function drawPolygon(pts, color, a = 1, close = true, lw = 6, blur = 36) {
+  if (pts.length < 2 || a <= 0) return;
+  ctx.save();
+  ctx.beginPath(); pts.forEach(([x, y], j) => j ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+  if (close) ctx.closePath();
+  ctx.shadowColor = color; ctx.shadowBlur = blur;
+  if (close && pts.length > 2) { ctx.fillStyle = hexA(color, 0.16 * a); ctx.fill(); }
+  ctx.strokeStyle = hexA(color, 0.95 * a); ctx.lineWidth = lw; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke();
+  ctx.restore();
+}
+function drawPlayhead(phase, cx = CX, cy = CY, rIn = 120, rOut = R + 40, lw = 4, tip = 8) {
+  const a = -Math.PI / 2 + TAU * phase, c = Math.cos(a), s = Math.sin(a);
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = lw; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(cx + c * rIn, cy + s * rIn); ctx.lineTo(cx + c * rOut, cy + s * rOut); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.9)'; circle(cx + c * rOut, cy + s * rOut, tip); ctx.fill();
+}
+function drawBead(x, y, color, dt, r0 = 26, ripple = 200) {
+  const pulse = dt < 0.22 ? 1 - dt / 0.22 : 0;
+  const r = r0 * (1 + 0.45 * pulse);
+  if (dt < 0.6) {
+    ctx.strokeStyle = hexA(color, 0.85 * (1 - dt / 0.6)); ctx.lineWidth = Math.max(2, r0 / 5);
+    circle(x, y, r0 + dt * ripple); ctx.stroke();
+  }
+  ctx.save(); ctx.shadowColor = color; ctx.shadowBlur = r0 + 30 * pulse; ctx.fillStyle = color; circle(x, y, r); ctx.fill(); ctx.restore();
+  ctx.fillStyle = 'rgba(255,255,255,0.35)'; circle(x - r * 0.3, y - r * 0.3, r * 0.3); ctx.fill();
+  if (pulse > 0) { ctx.fillStyle = `rgba(255,255,255,${0.6 * pulse})`; circle(x, y, r * 0.55); ctx.fill(); }
+}
+function drawRest(x, y, current, r0 = 9) {
+  ctx.fillStyle = current ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.42)';
+  circle(x, y, current ? r0 * 1.45 : r0); ctx.fill();
+}
+function drawCenter(text) {
+  ctx.font = `800 66px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.fillText(text, CX, CY + 2);
+  ctx.textBaseline = 'alphabetic';
+}
+function drawPattern(pat, color, cur, alpha = 1) {
+  const n = pat.length, step = Math.min(64, 820 / Math.max(1, n - 1)), size = Math.min(62, step * 1.15);
+  const x0 = CX - step * (n - 1) / 2, y = 1392;
+  ctx.save(); ctx.globalAlpha = alpha; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (let i = 0; i < n; i++) {
+    if (pat[i] == null) continue;
+    const isCur = i === cur;
+    ctx.font = `800 ${Math.round(size * (isCur ? 1.18 : 1))}px ${MONO}`;
+    ctx.fillStyle = isCur ? color : pat[i] ? '#ffffff' : 'rgba(255,255,255,0.4)';
+    ctx.fillText(pat[i] ? 'x' : '·', x0 + i * step, y);
+  }
+  ctx.restore();
+}
+function drawNumber(i, alpha) {
+  if (alpha <= 0) return;
+  const [x, y] = ptOn(i, 8, R + 62);
+  ctx.save(); ctx.globalAlpha = alpha; ctx.font = `800 36px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.fillText(String(i + 1), x, y); ctx.restore();
+}
+
+// ---------- scenes ----------
+function drawBackground(t, sc) {
+  ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, W, H);
+  const color = sc.rh ? RH[sc.rh].color : sc.accent;
+  let pulse = 0;
+  if (sc.rh) {
+    const rh = RH[sc.rh]; let best = Infinity;
+    for (const i of rh.kick) best = Math.min(best, sinceStep(rh, sc.t0, t, i));
+    pulse = best === Infinity ? 0 : Math.exp(-best * 7);
+  }
+  const g = ctx.createRadialGradient(CX, CY, 0, CX, CY, 640);
+  g.addColorStop(0, hexA(color, 0.10 + 0.10 * pulse)); g.addColorStop(1, hexA(color, 0));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+
+function drawGroove(t, sc) {
+  const rh = RH[sc.rh];
+  let alpha = 1, scale = 1;
+  if (sc.t0 > 0 && !sc.continuous) { const p = clamp01((t - sc.t0) / 0.32); alpha = easeOut(p); scale = 0.86 + 0.14 * easeOutBack(p); }
+  const phase = (((t - sc.t0) / rh.T) % 1 + 1) % 1, cur = Math.floor(phase * rh.n) % rh.n;
+  ctx.save(); ctx.globalAlpha = alpha;
+  ctx.translate(CX, CY); ctx.scale(scale, scale); ctx.translate(-CX, -CY);
+  drawTrack();
+  const pts = [];
+  rh.pat.forEach((x, i) => { if (x) pts.push(ptOn(i, rh.n, R)); });
+  drawPolygon(pts, rh.color);
+  drawPlayhead(phase);
+  for (let i = 0; i < rh.n; i++) {
+    const [x, y] = ptOn(i, rh.n, R);
+    if (rh.pat[i]) drawBead(x, y, rh.color, sinceStep(rh, sc.t0, t, i)); else drawRest(x, y, i === cur);
+  }
+  if (sc.center) drawCenter(`${rh.k} из ${rh.n}`);
+  ctx.restore();
+  if (sc.pattern) drawPattern(rh.pat, rh.color, cur, alpha);
+}
+
+// The three beads of the explainer: on the ring, pulled into the centre, then dealt back out on the beat.
+const STEPS = [0, 3, 6];
+const LAND = STEPS.map(p => 6.6 + p * RH.tresillo.T / 8);
+function beadPos(j, t) {
+  const ring = ptOn(STEPS[j], 8, R);
+  const a = -Math.PI / 2 + j * TAU / 3;
+  const cl = [CX + Math.cos(a) * 46, CY + Math.sin(a) * 46 + Math.sin(t * 5 + j * 2) * 6];
+  if (t < 4.4) return ring;
+  if (t < 4.75) return lerp2(ring, cl, easeInOut((t - 4.4) / 0.35));
+  const tl = LAND[j], ts = tl - 0.32;
+  if (t < ts) return cl;
+  if (t < tl) return lerp2(cl, ring, easeInOut((t - ts) / 0.32));
+  return ring;
+}
+
+function drawSetup(t, sc) {
+  const rh = RH.tresillo;
+  drawTrack();
+  const bp = [0, 1, 2].map(j => beadPos(j, t));
+  drawPolygon(bp, rh.color, 1 - clamp01((t - sc.t0) / 0.3));
+  for (let i = 0; i < 8; i++) {
+    const ta = sc.t0 + i * rh.T / 8;
+    if (t < ta) continue;
+    const p = clamp01((t - ta) / 0.18);
+    const [x, y] = ptOn(i, 8, R);
+    ctx.fillStyle = 'rgba(255,255,255,0.75)'; circle(x, y, Math.max(0, 11 * easeOutBack(p))); ctx.fill();
+    drawNumber(i, p);
+  }
+  bp.forEach(([x, y]) => drawBead(x, y, rh.color, Infinity));
+  // empty slots appear in the pattern row along with the dots
+  drawPattern(Array.from({ length: 8 }, (_, i) => t >= sc.t0 + i * rh.T / 8 ? 0 : null), rh.color, -1);
+}
+
+function drawPlace(t, sc) {
+  const rh = RH.tresillo;
+  const phase = (((t - sc.t0) / rh.T) % 1 + 1) % 1, cur = Math.floor(phase * 8) % 8;
+  drawTrack();
+  const numA = 0.8 * (1 - clamp01((t - sc.t0) / 0.5));
+  for (let i = 0; i < 8; i++) {
+    const [x, y] = ptOn(i, 8, R);
+    if (rh.pat[i]) { ctx.fillStyle = 'rgba(255,255,255,0.75)'; circle(x, y, 11); ctx.fill(); }
+    else drawRest(x, y, i === cur);
+    drawNumber(i, numA);
+  }
+  const landed = [0, 1, 2].filter(j => t >= LAND[j]);
+  const pts = landed.map(j => ptOn(STEPS[j], 8, R));
+  if (landed.length === 3) drawPolygon(pts, rh.color, clamp01((t - LAND[2]) / 0.25) * 0.6 + 0.4);
+  else drawPolygon(pts, rh.color, 1, false);
+  drawPlayhead(phase);
+  [0, 1, 2].forEach(j => { const [x, y] = beadPos(j, t); drawBead(x, y, rh.color, t >= LAND[j] ? t - LAND[j] : Infinity); });
+  const pat = Array(8).fill(0);
+  landed.forEach(j => { pat[STEPS[j]] = 1; });
+  drawPattern(pat, rh.color, cur);
+}
+
+const GRID = [['tresillo', 290, 830], ['aksak', 750, 830], ['ghana', 290, 1240], ['samba', 750, 1240]];
+const MR = 135;
+function drawGrid(t, sc) {
+  GRID.forEach(([key, cx, cy], idx) => {
+    const rh = RH[key];
+    const p = clamp01((t - sc.t0 - idx * 0.12) / 0.35);
+    if (p <= 0) return;
+    const s = 0.6 + 0.4 * easeOutBack(p);
+    const phase = (((t - sc.t0) / rh.T) % 1 + 1) % 1, cur = Math.floor(phase * rh.n) % rh.n;
+    ctx.save(); ctx.globalAlpha = easeOut(p);
+    ctx.translate(cx, cy); ctx.scale(s, s); ctx.translate(-cx, -cy);
+    drawTrack(cx, cy, MR, 2);
+    const pts = [];
+    rh.pat.forEach((x, i) => { if (x) pts.push(ptOn(i, rh.n, MR, cx, cy)); });
+    drawPolygon(pts, rh.color, 1, true, 4, 22);
+    drawPlayhead(phase, cx, cy, 0, MR + 18, 3, 5);
+    for (let i = 0; i < rh.n; i++) {
+      const [x, y] = ptOn(i, rh.n, MR, cx, cy);
+      if (rh.pat[i]) drawBead(x, y, rh.color, sinceStep(rh, sc.t0, t, i), 12, 90);
+      else drawRest(x, y, i === cur, 4.5);
+    }
+    ctx.restore();
+    ctx.save(); ctx.globalAlpha = easeOut(p); ctx.textAlign = 'center';
+    ctx.font = `800 38px ${FONT}`; ctx.fillStyle = rh.color; ctx.fillText(rh.name, cx, cy + MR + 60);
+    ctx.font = `600 30px ${FONT}`; ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fillText(rh.place, cx, cy + MR + 98);
+    ctx.restore();
+  });
+}
+
+function drawTexts(t, sc) {
+  const shown = sc.texts.filter(b => b.t <= t + 1e-9);
+  const b = shown[shown.length - 1];
+  if (!b) return;
+  const age = t - b.t, animated = b.t > 0;
+  const color = sc.rh ? RH[sc.rh].color : sc.accent;
+  let size = 94;
+  ctx.font = `900 ${size}px ${FONT}`;
+  const widest = Math.max(...b.lines.map(l => ctx.measureText(l).width));
+  if (widest > 940) size = Math.floor(size * 940 / widest);
+  const gap = size * 1.1, y0 = 330;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  b.lines.forEach((line, i) => {
+    const p = animated ? clamp01((age - i * 0.07) / 0.26) : 1;
+    if (p <= 0) return;
+    ctx.save(); ctx.globalAlpha = p; ctx.font = `900 ${size}px ${FONT}`;
+    ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 20; ctx.shadowOffsetY = 4;
+    ctx.fillStyle = i === b.lines.length - 1 ? color : '#ffffff';
+    ctx.fillText(line, 540, y0 + i * gap + (1 - easeOut(p)) * 34);
+    ctx.restore();
+  });
+  if (b.small) {
+    const p = animated ? clamp01((age - b.lines.length * 0.07 - 0.05) / 0.26) : 1;
+    if (p <= 0) return;
+    let ss = 46;
+    ctx.font = `600 ${ss}px ${FONT}`;
+    const w = ctx.measureText(b.small).width;
+    if (w > 920) ss = Math.floor(ss * 920 / w);
+    ctx.save(); ctx.globalAlpha = p * 0.92; ctx.font = `600 ${ss}px ${FONT}`;
+    ctx.fillStyle = '#cfd2ea'; ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 12;
+    ctx.fillText(b.small, 540, y0 + (b.lines.length - 1) * gap + 80 + (1 - easeOut(p)) * 20);
+    ctx.restore();
+  }
+}
+
+function drawFrame(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+  const sc = sceneAt(t);
+  drawBackground(t, sc);
+  if (sc.type === 'groove') drawGroove(t, sc);
+  else if (sc.type === 'setup') drawSetup(t, sc);
+  else if (sc.type === 'place') drawPlace(t, sc);
+  else if (sc.type === 'grid') drawGrid(t, sc);
+  drawTexts(t, sc);
+  ctx.drawImage(grain, 0, 0);
+}
+
+// ---------- audio ----------
+async function renderAudio() {
+  const SR = 48000;
+  const ac = new OfflineAudioContext(2, Math.ceil(SR * DURATION), SR);
+  const comp = ac.createDynamicsCompressor();
+  comp.threshold.value = -16; comp.knee.value = 8; comp.ratio.value = 4; comp.attack.value = 0.003; comp.release.value = 0.2;
+  comp.connect(ac.destination);
+  const master = ac.createGain(); master.gain.value = 0.8; master.connect(comp);
+  const verb = ac.createConvolver(); verb.buffer = makeIR(ac, 1.8);
+  const wet = ac.createGain(); wet.gain.value = 0.3; verb.connect(wet); wet.connect(comp);
+  const noise = makeNoise(ac, 2);
+
+  const out = (node, send = 0) => {
+    node.connect(master);
+    if (send) { const s = ac.createGain(); s.gain.value = send; node.connect(s); s.connect(verb); }
+  };
+  const env = (g, t, peak, a, d) => {
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + d);
+  };
+  function bell(key, t) {
+    const { f, d } = RH[key].bell;
+    const g = ac.createGain(); env(g, t, 0.28, 0.002, d); out(g, 0.45);
+    [[1, 1], [1.5, 0.5], [2.5, 0.22]].forEach(([m, a]) => {
+      const o = ac.createOscillator(), og = ac.createGain();
+      o.frequency.value = f * m; og.gain.value = a; o.connect(og); og.connect(g);
+      o.start(t); o.stop(t + d + 0.05);
+    });
+  }
+  function kick(t, vel = 1) {
+    const o = ac.createOscillator();
+    o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.32);
+    const g = ac.createGain(); env(g, t, 0.95 * vel, 0.002, 0.42); o.connect(g); out(g);
+    o.start(t); o.stop(t + 0.5);
+    const n = ac.createBufferSource(); n.buffer = noise;
+    const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1800;
+    const ng = ac.createGain(); env(ng, t, 0.22 * vel, 0.001, 0.012);
+    n.connect(hp); hp.connect(ng); out(ng);
+    n.start(t, Math.random()); n.stop(t + 0.03);
+  }
+  function shaker(t, vel = 1) {
+    const n = ac.createBufferSource(); n.buffer = noise;
+    const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7000;
+    const g = ac.createGain(); env(g, t, 0.07 * vel, 0.004, 0.05);
+    n.connect(hp); hp.connect(g); out(g, 0.1);
+    n.start(t, Math.random()); n.stop(t + 0.08);
+  }
+  function whoosh(tEnd, up = true, len = 0.5) {
+    const t0 = tEnd - len;
+    const n = ac.createBufferSource(); n.buffer = noise;
+    const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.4;
+    bp.frequency.setValueAtTime(up ? 300 : 4500, t0); bp.frequency.exponentialRampToValueAtTime(up ? 5000 : 300, tEnd);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.25, tEnd - 0.02); g.gain.exponentialRampToValueAtTime(0.0001, tEnd + 0.06);
+    n.connect(bp); bp.connect(g); out(g, 0.35);
+    n.start(t0, Math.random() * 0.5); n.stop(tEnd + 0.08);
+  }
+  function boom(t, vel = 1) {
+    const o = ac.createOscillator();
+    o.frequency.setValueAtTime(75, t); o.frequency.exponentialRampToValueAtTime(30, t + 1.2);
+    const g = ac.createGain(); env(g, t, vel, 0.004, 1.6); o.connect(g); out(g, 0.3);
+    o.start(t); o.stop(t + 1.8);
+  }
+  function pad(t0, t1) {
+    const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1500;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(1, t0 + 0.9);
+    g.gain.setValueAtTime(1, t1 - 0.3); g.gain.exponentialRampToValueAtTime(0.0001, t1 + 0.35);
+    lp.connect(g); out(g, 0.5);
+    [110, 164.81, 261.63, 392.0, 493.88].forEach(f => [-4, 4].forEach(c => {
+      const o = ac.createOscillator(); o.type = 'triangle'; o.frequency.value = f; o.detune.value = c;
+      const og = ac.createGain(); og.gain.value = 0.022; o.connect(og); og.connect(lp);
+      o.start(t0); o.stop(t1 + 0.4);
+    }));
+  }
+
+  // [start, end, rhythm, whether the lead bell plays]
+  const GROOVES = [
+    [0, 4.4, 'tresillo', true], [4.4, 6.6, 'tresillo', false], [6.6, 8.8, 'tresillo', true], [8.8, 11.0, 'tresillo', true],
+    [11.0, 15.4, 'cinquillo', true], [15.4, 19.0, 'aksak', true], [19.0, 23.4, 'ghana', true], [23.4, 28.2, 'samba', true],
+    [33.0, DURATION, 'tresillo', true],
+  ];
+  let hits = 0;
+  for (const [t0, t1, key, lead] of GROOVES) {
+    const rh = RH[key];
+    for (let c = 0; t0 + c * rh.T < t1 - 1e-6; c++) {
+      for (let i = 0; i < rh.n; i++) {
+        const t = t0 + (c + i / rh.n) * rh.T;
+        if (t >= t1 - 1e-6) break;
+        const onKick = rh.kick.includes(i);
+        shaker(t, onKick ? 1.6 : 1);
+        if (onKick) kick(t, i === 0 ? 1 : 0.85);
+        if (lead && rh.pat[i]) { bell(key, t); hits++; }
+      }
+    }
+  }
+  whoosh(4.75, false, 0.35);
+  [11.0, 15.4, 19.0, 23.4, 28.2, 33.0].forEach(t => whoosh(t));
+  boom(28.2, 1); boom(30.6, 0.6);
+  pad(28.2, 33.0);
+
+  const buf = await ac.startRendering();
+  return { wav: encodeWav(buf), hits };
+}
+function makeNoise(ac, sec) {
+  const b = ac.createBuffer(1, Math.floor(ac.sampleRate * sec), ac.sampleRate), d = b.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  return b;
+}
+function makeIR(ac, sec) {
+  const len = Math.floor(ac.sampleRate * sec), b = ac.createBuffer(2, len, ac.sampleRate);
+  for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3); }
+  return b;
+}
+function encodeWav(buf) {
+  const ch = buf.numberOfChannels, len = buf.length, sr = buf.sampleRate, chans = [];
+  for (let c = 0; c < ch; c++) chans.push(buf.getChannelData(c));
+  let peak = 0;
+  for (const d of chans) for (let i = 0; i < len; i++) { const a = Math.abs(d[i]); if (a > peak) peak = a; }
+  const gain = peak > 0 ? 0.89 / peak : 1;   // normalise to about -1 dBFS
+  const bytes = new ArrayBuffer(44 + len * ch * 2), v = new DataView(bytes);
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, 'RIFF'); v.setUint32(4, 36 + len * ch * 2, true); ws(8, 'WAVE'); ws(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, ch, true); v.setUint32(24, sr, true);
+  v.setUint32(28, sr * ch * 2, true); v.setUint16(32, ch * 2, true); v.setUint16(34, 16, true); ws(36, 'data'); v.setUint32(40, len * ch * 2, true);
+  let o = 44;
+  for (let i = 0; i < len; i++) for (let c = 0; c < ch; c++) {
+    const s = Math.max(-1, Math.min(1, chans[c][i] * gain));
+    v.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7fff, true); o += 2;
+  }
+  const u8 = new Uint8Array(bytes);
+  let bin = '';
+  for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+window.VIDEO = { FPS, DURATION };
+window.renderAudio = renderAudio;
+window.frameJPEG = t => { drawFrame(t); return cv.toDataURL('image/jpeg', 0.93).split(',')[1]; };
+window.framePNG = t => { drawFrame(t); return cv.toDataURL('image/png').split(',')[1]; };
+window.ready = document.fonts.ready.then(() => {
+  drawFrame(0);
+  return { inter: document.fonts.check(`900 40px ${FONT}`), mono: document.fonts.check(`800 40px ${MONO}`) };
+});
+</script>
+</body>
+</html>

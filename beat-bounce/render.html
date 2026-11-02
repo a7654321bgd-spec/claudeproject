@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Квадрат в ритме</title>
+<style>html, body { margin: 0; background: #000; } canvas { display: block; }</style>
+</head>
+<body>
+<canvas id="cv" width="1080" height="1920"></canvas>
+<script>
+'use strict';
+// Draws the square that hits a wall on every beat, from the plan build.js makes (bounce.js over
+// beats.json). Before the drop everything is monochrome; the drop turns the colour on, and in the
+// last bar the camera pulls back to show every lit wall at once.
+const W = 1080, H = 1920, FPS = 60, TAU = Math.PI * 2;
+const FONT = '"Inter Display", "Inter", sans-serif';
+const ANCHOR = [540, 1010];             // where the camera keeps the square on screen
+const REVEAL = 1.7;                     // seconds of pull-back at the end
+
+const clamp01 = x => x < 0 ? 0 : x > 1 ? 1 : x;
+const smooth = (a, b, x) => { const k = clamp01((x - a) / (b - a)); return k * k * (3 - 2 * k); };
+const easeOut = x => 1 - Math.pow(1 - clamp01(x), 3);
+const hsla = (h, s, l, a) => `hsla(${h},${s}%,${l}%,${a})`;
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function lastAtOrBefore(arr, t, key) {
+  let lo = 0, hi = arr.length - 1, ans = -1;
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (key(arr[m]) <= t) { ans = m; lo = m + 1; } else hi = m - 1; }
+  return ans;
+}
+
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const grain = document.createElement('canvas');
+grain.width = W; grain.height = H;
+{
+  const g = grain.getContext('2d'), id = g.createImageData(W, H), rng = mulberry32(9);
+  for (let i = 0; i < id.data.length; i += 4) { const v = rng() * 255; id.data[i] = id.data[i + 1] = id.data[i + 2] = v; id.data[i + 3] = 10; }
+  g.putImageData(id, 0, 0);
+}
+
+let B, PLAN, AD, DUR, T_DROP, WALLS, SEGS, CAM, MAP, SPARKS, HALF;
+
+// colour of the square after hit j: grey before the drop, then round the rainbow, one step per hit
+function hueAt(j) { return (330 + 24 * Math.max(0, j - DROP_INDEX)) % 360; }
+let DROP_INDEX = 0;
+function colorOf(j, l = 62, a = 1) { return j < DROP_INDEX ? `hsla(255,20%,${Math.min(96, l + 22)}%,${a})` : hsla(hueAt(j), 95, l, a); }
+
+function pos(t) {
+  const i = Math.max(0, lastAtOrBefore(SEGS, t, s => s.t0));
+  const s = SEGS[i], k = Math.min(t, s.t1) - s.t0;
+  return [s.x0 + s.dx * PLAN.u * k, s.y0 + s.dy * PLAN.u * k];
+}
+const hitIndex = t => lastAtOrBefore(WALLS, t, w => w.t);
+
+function setup(data) {
+  B = data.beats; PLAN = data.plan; AD = data.ad || null;
+  DUR = Math.floor(B.duration * FPS) / FPS;
+  WALLS = PLAN.walls; SEGS = PLAN.segs; HALF = PLAN.half;
+  DROP_INDEX = WALLS.findIndex(w => w.kind === 'drop');
+  T_DROP = WALLS[DROP_INDEX].t;
+
+  // camera: a critically damped spring chasing a point a little ahead on the path
+  CAM = [];
+  let [cx, cy] = pos(0.15), vx = 0, vy = 0;
+  const w0 = 8, sub = 4, dt = 1 / FPS / sub;
+  for (let f = 0; f <= Math.ceil(DUR * FPS); f++) {
+    for (let k = 0; k < sub; k++) {
+      const t = (f * sub + k) * dt;
+      const [ax, ay] = pos(t), [bx, by] = pos(Math.min(DUR, t + 0.32));
+      const tx = 0.55 * ax + 0.45 * bx, ty = 0.55 * ay + 0.45 * by;
+      vx += (w0 * w0 * (tx - cx) - 2 * w0 * vx) * dt; vy += (w0 * w0 * (ty - cy) - 2 * w0 * vy) * dt;
+      cx += vx * dt; cy += vy * dt;
+    }
+    CAM.push([cx, cy]);
+  }
+  // the whole picture for the pull-back at the end
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const w of WALLS) { x0 = Math.min(x0, w.cx - w.w / 2); x1 = Math.max(x1, w.cx + w.w / 2); y0 = Math.min(y0, w.cy - w.h / 2); y1 = Math.max(y1, w.cy + w.h / 2); }
+  const zoom = Math.min(980 / (x1 - x0), 1040 / (y1 - y0));   // fits between the title and TikTok's caption
+  MAP = { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, zoom };
+
+  // sparks for every hit, fixed in advance so any frame can be drawn on its own
+  const rng = mulberry32(42);
+  SPARKS = WALLS.map((w, j) => {
+    const n = w.kind === 'drop' ? 70 : Math.round(8 + 18 * Math.min(1, w.s));
+    const px = w.cx - w.nx * (w.w / 2), py = w.cy - w.ny * (w.h / 2);   // the face the square touched
+    const base = Math.atan2(w.ny, w.nx);
+    return Array.from({ length: n }, () => {
+      const a = base + (rng() * 2 - 1) * 1.25, sp = (180 + 560 * rng()) * (w.kind === 'drop' ? 1.8 : 0.6 + 0.4 * Math.min(1, w.s));
+      return { x: px, y: py, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.28 + 0.3 * rng(), size: 2 + 3 * rng() };
+    });
+  });
+  return { FPS, DURATION: DUR, hits: WALLS.length, map: MAP };
+}
+
+// ---------- drawing ----------
+function view(t) {
+  const fi = Math.max(0, Math.min(CAM.length - 1.001, t * FPS)), f = Math.floor(fi), q = fi - f;
+  let cx = CAM[f][0] + (CAM[f + 1][0] - CAM[f][0]) * q, cy = CAM[f][1] + (CAM[f + 1][1] - CAM[f][1]) * q, z = 0.95;
+  const dk = t - T_DROP;
+  if (dk >= 0) z += 0.12 * Math.exp(-dk / 0.22);
+  const r = smooth(DUR - REVEAL, DUR - 0.25, t);
+  cx += (MAP.cx - cx) * r; cy += (MAP.cy - cy) * r; z += (MAP.zoom - z) * r;
+  // shake along the direction of recent hits
+  let sx = 0, sy = 0;
+  for (let j = hitIndex(t); j >= 0 && t - WALLS[j].t < 0.3; j--) {
+    const w = WALLS[j], tau = t - w.t, amp = (w.kind === 'drop' ? 26 : 3 + 9 * Math.min(1, w.s)) * Math.exp(-tau / 0.07);
+    const wob = Math.cos(tau * 75);
+    sx += -w.nx * amp * wob; sy += -w.ny * amp * wob;
+  }
+  return { cx, cy, z, sx: sx * (1 - r), sy: sy * (1 - r), reveal: r, ay: ANCHOR[1] - 40 * r };
+}
+
+function drawBackground(t, j, v) {
+  const e = B.envelope[Math.min(B.envelope.length - 1, Math.round(t * FPS))] || 0;
+  ctx.fillStyle = '#05040a'; ctx.fillRect(0, 0, W, H);
+  const hue = j < DROP_INDEX ? 255 : hueAt(j);
+  const g = ctx.createRadialGradient(ANCHOR[0], ANCHOR[1], 50, ANCHOR[0], ANCHOR[1], 1300);
+  g.addColorStop(0, hsla(hue, 70, 22, j < DROP_INDEX ? 0.3 : 0.25 + 0.35 * e)); g.addColorStop(1, 'rgba(5,4,10,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // world grid, so the motion reads even between walls
+  const step = 100 * v.z, ox = (ANCHOR[0] - v.cx * v.z + v.sx) % step, oy = (v.ay - v.cy * v.z + v.sy) % step;
+  ctx.strokeStyle = `rgba(255,255,255,${0.035 + 0.05 * e})`; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = ox; x < W; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+  for (let y = oy; y < H; y += step) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+  ctx.stroke();
+}
+
+const LEAD = 0.9;   // a wall shows up this long before the square reaches it
+function drawWalls(t) {
+  for (let i = 0; i < WALLS.length; i++) {
+    const w = WALLS[i], tau = t - w.t;
+    let x = w.cx - w.w / 2, y = w.cy - w.h / 2;
+    if (tau < 0) {
+      // the next few walls: an outline that fades in and wakes up just before its hit
+      const show = smooth(-LEAD, -LEAD + 0.25, tau);
+      if (show <= 0) continue;
+      const soon = Math.exp(tau / 0.18);
+      ctx.strokeStyle = `rgba(255,255,255,${show * (0.3 + 0.6 * soon)})`; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.roundRect(x, y, w.w, w.h, 6); ctx.stroke();
+      continue;
+    }
+    const k = Math.exp(-tau / 0.12), recoil = 9 * Math.exp(-tau / 0.09) * Math.sin(Math.min(Math.PI, tau * 40));
+    x -= w.nx * recoil; y -= w.ny * recoil;
+    const fade = 0.55 + 0.45 * Math.exp(-tau / 1.6);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = colorOf(i, 60, 0.18 * fade + 0.4 * k);
+    ctx.beginPath(); ctx.roundRect(x - 10, y - 10, w.w + 20, w.h + 20, 14); ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = colorOf(i, 62 + 30 * k, fade);
+    ctx.beginPath(); ctx.roundRect(x, y, w.w, w.h, 6); ctx.fill();
+  }
+}
+
+function drawTrail(t, v) {
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  // in the pull-back the whole flight shows as a thin line through every wall it touched
+  if (v.reveal > 0) {
+    for (let i = 0; i < SEGS.length && SEGS[i].t0 < t; i++) {
+      const s = SEGS[i], [xb, yb] = pos(Math.min(t, s.t1));
+      ctx.strokeStyle = colorOf(i, 66, 0.55 * v.reveal); ctx.lineWidth = 3.5 / v.z;
+      ctx.beginPath(); ctx.moveTo(s.x0, s.y0); ctx.lineTo(xb, yb); ctx.stroke();
+    }
+  }
+  // the comet tail: one stroke per straight run, fading along its length
+  const span = 0.85, from = Math.max(0, t - span);
+  const i0 = Math.max(0, lastAtOrBefore(SEGS, from, s => s.t0)), i1 = Math.max(0, lastAtOrBefore(SEGS, t, s => s.t0));
+  for (let i = i0; i <= i1; i++) {
+    const s = SEGS[i], a = Math.max(from, s.t0), b = Math.min(t, s.t1);
+    if (b <= a) continue;
+    const [xa, ya] = pos(a), [xb, yb] = pos(b), ageA = 1 - (t - a) / span, ageB = 1 - (t - b) / span;
+    const g = ctx.createLinearGradient(xa, ya, xb, yb);
+    g.addColorStop(0, colorOf(i, 62, 0.7 * ageA * ageA)); g.addColorStop(1, colorOf(i, 62, 0.7 * ageB * ageB));
+    ctx.strokeStyle = g; ctx.lineWidth = 4 + 24 * Math.pow((ageA + ageB) / 2, 2);
+    ctx.beginPath(); ctx.moveTo(xa, ya); ctx.lineTo(xb, yb); ctx.stroke();
+  }
+}
+
+function drawSparks(t) {
+  ctx.globalCompositeOperation = 'lighter';
+  for (let j = hitIndex(t); j >= 0 && t - WALLS[j].t < 1.2; j--) {
+    const w = WALLS[j], tau = t - w.t;
+    // shock ring at the point of contact
+    const ringLife = w.kind === 'drop' ? 0.7 : 0.35;
+    if (tau < ringLife) {
+      const k = tau / ringLife, px = w.cx - w.nx * (w.w / 2), py = w.cy - w.ny * (w.h / 2);
+      ctx.strokeStyle = colorOf(j, 80, 0.8 * (1 - k)); ctx.lineWidth = (w.kind === 'drop' ? 18 : 6) * (1 - k) + 1;
+      ctx.beginPath(); ctx.arc(px, py, 10 + (w.kind === 'drop' ? 700 : 60 + 60 * Math.min(1, w.s)) * easeOut(k), 0, TAU); ctx.stroke();
+    }
+    for (const p of SPARKS[j]) {
+      if (tau > p.life) continue;
+      const e = (1 - Math.exp(-4 * tau)) / 4, a = 1 - tau / p.life;
+      ctx.fillStyle = colorOf(j, 75, a);
+      ctx.beginPath(); ctx.arc(p.x + p.vx * e, p.y + p.vy * e, p.size * (0.5 + 0.5 * a), 0, TAU); ctx.fill();
+    }
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+function drawSquare(t, j, v) {
+  const [x, y] = pos(t);
+  let sx = 1, sy = 1;
+  if (j >= 0) {
+    const w = WALLS[j], k = Math.exp(-(t - w.t) / 0.07) * (w.kind === 'drop' ? 1.3 : 0.6 + 0.4 * Math.min(1, w.s));
+    const along = 1 - 0.38 * k, across = 1 + 0.26 * k;
+    if (w.nx) { sx = along; sy = across; } else { sx = across; sy = along; }
+  }
+  const glowR = HALF * 3.4 / Math.max(0.5, v.z);
+  const halo = ctx.createRadialGradient(x, y, HALF * 0.6, x, y, glowR);
+  halo.addColorStop(0, colorOf(Math.max(0, j), 62, 0.6)); halo.addColorStop(1, colorOf(Math.max(0, j), 62, 0));
+  ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(x, y, glowR, 0, TAU); ctx.fill();
+  ctx.save(); ctx.translate(x, y); ctx.scale(sx, sy);
+  ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.roundRect(-HALF, -HALF, 2 * HALF, 2 * HALF, 11); ctx.fill();
+  ctx.strokeStyle = colorOf(Math.max(0, j), 60, 1); ctx.lineWidth = 6;
+  ctx.beginPath(); ctx.roundRect(-HALF + 3, -HALF + 3, 2 * HALF - 6, 2 * HALF - 6, 9); ctx.stroke();
+  ctx.restore();
+}
+
+function label(str, x, y, size, color, weight = 900, maxW = 960) {
+  ctx.font = `${weight} ${size}px ${FONT}`;
+  const w = ctx.measureText(str).width;
+  if (w > maxW) { size = Math.floor(size * maxW / w); ctx.font = `${weight} ${size}px ${FONT}`; }
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+  ctx.strokeStyle = 'rgba(3,3,8,0.92)'; ctx.lineWidth = Math.max(8, size * 0.15); ctx.strokeText(str, x, y);
+  ctx.fillStyle = color; ctx.fillText(str, x, y);
+}
+function drawText(t, j, v) {
+  const dk = t - T_DROP, bump = dk >= 0 ? 1 + 0.12 * Math.exp(-dk / 0.18) : 1;
+  ctx.save(); ctx.translate(540, 248); ctx.scale(bump, bump);
+  label('ПОПАДАЕТ В КАЖДЫЙ БИТ', 0, 0, 104, '#ffffff');
+  ctx.restore();
+  const sub = v.reveal > 0.35 ? 'так выглядит этот бит' : 'включи звук';
+  const color = j < DROP_INDEX ? '#d9d4ff' : hsla(hueAt(j), 100, 80, 1);
+  label(sub, 540, 338, 56, color, 800, 900);
+}
+
+// ---------- ad badge, lower-left: clear of TikTok's caption and its buttons ----------
+function drawDomino(x, y, w, h) {
+  ctx.fillStyle = '#f5f1e6'; ctx.beginPath(); ctx.roundRect(x, y, w, h, w * 0.24); ctx.fill();
+  ctx.strokeStyle = 'rgba(28,28,38,0.6)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x + 5, y + h / 2); ctx.lineTo(x + w - 5, y + h / 2); ctx.stroke();
+  const s = w * 0.26, r = w * 0.095, cx = x + w / 2;
+  ctx.fillStyle = '#1c1c26';
+  const pips = (cy, list) => list.forEach(([px, py]) => { ctx.beginPath(); ctx.arc(cx + px * s, cy + py * s, r, 0, TAU); ctx.fill(); });
+  pips(y + h / 4, [[-1, -1], [0, 0], [1, 1]]);
+  pips(y + 3 * h / 4, [[-1, -1], [1, -1], [0, 0], [-1, 1], [1, 1]]);
+}
+function drawAd(t) {
+  if (!AD) return;
+  const x = 36, pad = 20, icon = 34, gap = 18, label1 = 'РЕКЛАМА · TELEGRAM-БОТ';
+  ctx.font = `700 15px ${FONT}`; ctx.letterSpacing = '1.5px'; const lw = ctx.measureText(label1).width; ctx.letterSpacing = '0px';
+  ctx.font = `900 40px ${FONT}`; const tw = ctx.measureText(AD.title).width;
+  ctx.font = `800 24px ${FONT}`; const sw = ctx.measureText(AD.sub).width;
+  const w = pad * 2 + icon + gap + Math.max(lw, tw, sw), h = 110, y = 1504 - h;
+  ctx.fillStyle = 'rgba(10,10,22,0.82)'; ctx.beginPath(); ctx.roundRect(x, y, w, h, 18); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1.5; ctx.stroke();
+  const k = ((t % 6) + 6) % 6 / 1.2;                    // a light sweep every 6 s
+  if (k < 1) {
+    ctx.save(); ctx.beginPath(); ctx.roundRect(x, y, w, h, 18); ctx.clip();
+    const sx = x - 90 + (w + 180) * k, g = ctx.createLinearGradient(sx - 70, y, sx + 70, y + h);
+    g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.5, 'rgba(255,255,255,0.18)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g; ctx.fillRect(x, y, w, h);
+    ctx.restore();
+  }
+  drawDomino(x + pad, y + (h - 62) / 2, icon, 62);
+  const tx = x + pad + icon + gap;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.font = `700 15px ${FONT}`; ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.letterSpacing = '1.5px';
+  ctx.fillText(label1, tx, y + 28); ctx.letterSpacing = '0px';
+  ctx.font = `900 40px ${FONT}`; ctx.fillStyle = '#ffffff'; ctx.fillText(AD.title, tx, y + 68);
+  ctx.font = `800 24px ${FONT}`; ctx.fillStyle = '#5ec2ff'; ctx.fillText(AD.sub, tx, y + 97);
+}
+
+function drawFrame(t) {
+  const j = hitIndex(t), v = view(t);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  drawBackground(t, j, v);
+  ctx.setTransform(v.z, 0, 0, v.z, ANCHOR[0] - v.cx * v.z + v.sx, v.ay - v.cy * v.z + v.sy);
+  drawWalls(t);
+  drawTrail(t, v);
+  drawSparks(t);
+  drawSquare(t, j, v);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  // flash on the hardest hits
+  if (j >= 0) {
+    const w = WALLS[j], tau = t - w.t;
+    const a = w.kind === 'drop' ? 0.32 * Math.exp(-tau / 0.12) : w.s >= 0.95 ? 0.07 * Math.exp(-tau / 0.06) : 0;
+    if (a > 0.004) { ctx.fillStyle = `rgba(255,255,255,${a})`; ctx.fillRect(0, 0, W, H); }
+  }
+  drawText(t, j, v);
+  drawAd(t);
+  ctx.drawImage(grain, 0, 0);
+}
+
+window.setup = setup;
+window.frameJPEG = t => { drawFrame(t); return cv.toDataURL('image/jpeg', 0.93).split(',')[1]; };
+window.framePNG = t => { drawFrame(t); return cv.toDataURL('image/png').split(',')[1]; };
+window.ready = document.fonts.load(`900 100px ${FONT}`).then(() => document.fonts.load(`800 50px ${FONT}`))
+  .then(() => ({ font: document.fonts.check(`900 100px "Inter Display"`) }));
+</script>
+</body>
+</html>

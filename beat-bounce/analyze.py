@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
 """Beat analysis for the beat-bounce video.
 
-Fits the beat grid to the track, finds the drop, cuts the clip (two bars before the drop and
-sixteen after) and picks the moments the square hits a wall. Writes beats.json for build.js.
+Fits the beat grid to the track, finds the drop, cuts the clip (by default two bars before the drop
+and sixteen after) and picks the moments the square hits a wall. Writes beats.json for build.js.
 
     python3 analyze.py path/to/track.mp3
+    python3 analyze.py track.mp3 --out jealous.json --drop 7.5 --before 4 --after 8
 
 Onset times come from spectral flux mapped to the middle of the two frames it compares; mapping
 them to frame starts instead puts every beat about 60 ms early, which is visible at 60 fps.
 """
+import argparse
 import json
 import subprocess
-import sys
 
 import numpy as np
 
 SR, N, HOP = 44100, 1024, 64          # 1.45 ms between onset values
-BARS_BEFORE, BARS_AFTER = 2, 16
-OUT = 'beats.json'
 
 
 def decode(path):
@@ -81,27 +80,33 @@ def fit_grid(t, env, t_from, t_to):
     return p, (t_from + ph) % p
 
 
-def main(path):
+def main(path, out='beats.json', drop_hint=None, bars_before=2, bars_after=16):
     x = decode(path)
     dur = len(x) / SR
     t, env = flux_bands(x)
 
-    # the drop: the biggest lasting rise in loudness
-    hop = SR // 2
-    rms = np.array([np.sqrt(np.mean(x[i:i + hop] ** 2)) for i in range(0, len(x) - hop, hop)])
-    db = 20 * np.log10(rms + 1e-9)
-    w = 16                                              # 8 s either side
-    rise = [db[i:i + w].mean() - db[i - w:i].mean() for i in range(w, len(db) - w)]
-    rise_t = (w + int(np.argmax(rise))) * 0.5
+    if drop_hint is None:
+        # the drop: the biggest lasting rise in loudness
+        hop = SR // 2
+        rms = np.array([np.sqrt(np.mean(x[i:i + hop] ** 2)) for i in range(0, len(x) - hop, hop)])
+        db = 20 * np.log10(rms + 1e-9)
+        w = 16                                          # 8 s either side
+        rise = [db[i:i + w].mean() - db[i - w:i].mean() for i in range(w, len(db) - w)]
+        rise_t = (w + int(np.argmax(rise))) * 0.5
+    else:
+        rise_t = drop_hint
 
     period, phase = fit_grid(t, env['all'], rise_t, min(dur - 4, rise_t + 80))
     beat_t = lambda k: phase + k * period
     k_rise = int(round((rise_t - phase) / period))
-    # the drop lands with a crash: the beat near the rise with the hardest high-frequency hit
     peak = lambda e, tt: float(np.max(np.interp(tt + np.arange(-0.01, 0.011, 0.001), t, e)))
-    k_drop = max(range(k_rise - 6, k_rise + 7), key=lambda k: peak(env['high'], beat_t(k)))
+    if drop_hint is None:
+        # the drop lands with a crash: the beat near the rise with the hardest high-frequency hit
+        k_drop = max(range(k_rise - 6, k_rise + 7), key=lambda k: peak(env['high'], beat_t(k)))
+    else:
+        k_drop = k_rise
     drop = beat_t(k_drop)
-    k0, k1 = k_drop - 4 * BARS_BEFORE, k_drop + 4 * BARS_AFTER
+    k0, k1 = k_drop - 4 * bars_before, k_drop + 4 * bars_after
     start, end = beat_t(k0), beat_t(k1)
 
     strength = lambda tt: peak(env['low'], tt)
@@ -114,14 +119,20 @@ def main(path):
     # Every beat is a hit; between beats, an eighth or sixteenth is a hit when the drums really
     # sound there (measured against the beats of the same bar). The bar is stricter in the first half
     # of the drop than in the second, so the square gets busier as the track goes on.
-    add(start, 'start', 1.0)                             # the pre-drop phrase opens with a hit, then a glide
+    add(start, 'start', 1.0)                             # the pre-drop phrase opens with a hit
+    # earlier bars before the drop: a hit on each beat that clearly sounds (a vocal count-in, say),
+    # a glide through the quiet ones
+    beat_ref = np.median([peak(env['all'], beat_t(k)) for k in range(k_drop, k1)])
+    for k in range(k0 + 1, k_drop - 4):
+        if peak(env['all'], beat_t(k)) >= 0.45 * beat_ref:
+            add(beat_t(k), 'beat', 0.5)
     sixteenth = period / 4
-    for bar in range(-1, BARS_AFTER):                    # bar -1 is the build just before the drop
+    for bar in range(-1, bars_after):                    # bar -1 is the build just before the drop
         b0 = drop + bar * 4 * period
         rel = [peak(env['all'], b0 + k * sixteenth) for k in range(16)]
         ref = np.median(rel[0::4])
         rel = [v / ref for v in rel]
-        bar_low = 0.85 if bar < BARS_AFTER // 2 else 0.7
+        bar_low = 0.85 if bar < bars_after // 2 else 0.7
         for k in range(16):
             tt, low = b0 + k * sixteenth, strength(b0 + k * sixteenth) / ref_low
             if k % 4 == 0:
@@ -153,7 +164,7 @@ def main(path):
         'duration': end - start, 'events': events,
         'envelope': [round(float(v), 3) for v in env60], 'bass': [round(float(v), 3) for v in bass60],
     }
-    with open(OUT, 'w') as fh_:
+    with open(out, 'w') as fh_:
         json.dump(data, fh_)
     print(f"tempo {60 / period:.2f} BPM, beat {period * 1000:.2f} ms, grid phase {phase:.4f}s")
     print(f"drop at {drop:.3f}s; clip {start:.3f}–{end:.3f}s ({end - start:.2f}s)")
@@ -165,4 +176,11 @@ def main(path):
 
 
 if __name__ == '__main__':
-    main(sys.argv[1])
+    ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
+    ap.add_argument('track')
+    ap.add_argument('--out', default='beats.json')
+    ap.add_argument('--drop', type=float, help='seconds into the track where the drop lands (found automatically if left out)')
+    ap.add_argument('--before', type=int, default=2, help='bars of the clip before the drop')
+    ap.add_argument('--after', type=int, default=16, help='bars of the clip from the drop on')
+    a = ap.parse_args()
+    main(a.track, a.out, a.drop, a.before, a.after)

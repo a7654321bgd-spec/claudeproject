@@ -1,7 +1,9 @@
 // Renders the beat-bounce video: a square that hits a wall on every beat of the track.
-// beats.json comes from analyze.py; the track itself is not in the repository.
+// The hits come from analyze.py; the track itself is not in the repository.
 //
 //   node build.js --track path/to/track.mp3        → beat-bounce.mp4 and beat-bounce-cover.jpg
+//   node build.js --beats jealous.json --track jealous.mp3 --out beat-bounce-jealous.mp4 --seed 7 --bound 1600,2000
+//                                                   (--seed and --bound steer the path planner, see bounce.js)
 //   node build.js --preview 0,3.1,12               → PNG stills in preview/, no track needed
 //   --ad-title "Domino Team" --ad-sub "@dtlinkk_bot"   the ad badge in the lower-left corner
 'use strict';
@@ -13,7 +15,7 @@ const { plan } = require('./bounce');
 
 const args = process.argv.slice(2);
 const opt = (name, fallback) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : fallback; };
-const beats = JSON.parse(fs.readFileSync(path.join(__dirname, 'beats.json'), 'utf8'));
+const beats = JSON.parse(fs.readFileSync(path.resolve(__dirname, opt('--beats', 'beats.json')), 'utf8'));
 const out = path.resolve(__dirname, opt('--out', 'beat-bounce.mp4'));
 const track = opt('--track', null);
 const AD = { title: opt('--ad-title', 'Domino Team'), sub: opt('--ad-sub', '@dtlinkk_bot') };
@@ -30,7 +32,9 @@ function truePeak(wav) {
 }
 
 (async () => {
-  const p = plan(beats.events, beats.duration, { seed: +opt('--seed', 11) });
+  const planOpts = { seed: +opt('--seed', 11) };
+  if (opt('--bound', null)) { const [bx, by] = opt('--bound').split(',').map(Number); planOpts.bound = { x: bx, y: by }; }
+  const p = plan(beats.events, beats.duration, planOpts);
   console.log(`plan: ${p.walls.length} walls, search visited ${p.visited} nodes`);
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1080, height: 1920 }, deviceScaleFactor: 1 });

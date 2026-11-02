@@ -1,0 +1,754 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Кольца: красный против синего</title>
+<style>html, body { margin: 0; background: #000; } canvas { display: block; }</style>
+</head>
+<body>
+<canvas id="cv" width="1080" height="1920"></canvas>
+<script>
+'use strict';
+// Draws the race frame by frame from a precomputed simulation (sim.js, run in Node by build.js)
+// and synthesises the soundtrack from the same events, so every note lands on a bounce.
+const W = 1080, H = 1920, FPS = 60, TAU = Math.PI * 2;
+const FONT = '"Inter Display", "Inter", sans-serif';
+const TEAM = [
+  { name: 'КРАСНЫЙ', rgb: [255, 52, 88], light: [255, 168, 184] },
+  { name: 'СИНИЙ', rgb: [46, 140, 255], light: [168, 210, 255] },
+];
+const DATIVE = ['КРАСНОМУ', 'СИНЕМУ'];
+const GOLD = [255, 201, 72];
+const INTRO_END = 3.2;          // hook text gives way to the rings counter
+const SLOW = 0.25;              // speed of the replay-style slow motion on the deciding escape
+
+const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+const hsla = (h, s, l, a) => `hsla(${h},${s}%,${l}%,${a})`;
+const clamp01 = x => x < 0 ? 0 : x > 1 ? 1 : x;
+const smooth = (a, b, x) => { const k = clamp01((x - a) / (b - a)); return k * k * (3 - 2 * k); };
+const easeOut = x => 1 - Math.pow(1 - clamp01(x), 3);
+const easeOutBack = x => { x = clamp01(x); const c1 = 2.2, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+const wrap = a => { a = (a + Math.PI) % TAU; if (a < 0) a += TAU; return a - Math.PI; };
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function lastAtOrBefore(arr, t, key = x => x) {   // index of the last item with key <= t, or -1
+  let lo = 0, hi = arr.length - 1, ans = -1;
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (key(arr[m]) <= t) { ans = m; lo = m + 1; } else hi = m - 1; }
+  return ans;
+}
+const plural = (n, one, few, many) => {
+  const d = n % 10, h = n % 100;
+  return d === 1 && h !== 11 ? one : d >= 2 && d <= 4 && (h < 12 || h > 14) ? few : many;
+};
+
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+
+let SIM, P, RINGS, N, CX, CY, BR, BREAKS, BOUNCES, CLACKS, BOUNCE_T_BY_RING;
+let WARP, S_FINAL, V_FINAL, V_DECIDER, DURATION, FX, POPS, SCORE_POPS, HEARTS, CONFETTI, ZOOM, COMEBACK, NEAR, STORY;
+
+// ---------- time: slow motion around the deciding escape ----------
+function buildWarp() {
+  const ds = 1 / 2000, f = S_FINAL;
+  const in0 = f - 0.5, in1 = f - 0.36, out0 = f + 0.16, out1 = f + 0.42;
+  const speed = s => 1 - (1 - SLOW) * (smooth(in0, in1, s) - smooth(out0, out1, s));
+  const n = Math.ceil((f + P.tail) / ds) + 1;
+  const vs = new Float64Array(n);
+  for (let i = 1; i < n; i++) vs[i] = vs[i - 1] + ds / speed((i - 0.5) * ds);
+  return {
+    in0, out1,
+    v(s) { const x = Math.max(0, Math.min(n - 1.0001, s / ds)), i = Math.floor(x); return vs[i] + (vs[i + 1] - vs[i]) * (x - i); },
+    s(v) {
+      if (v >= vs[n - 1]) return (n - 1) * ds + (v - vs[n - 1]);
+      const i = Math.max(0, lastAtOrBefore(vs, v));
+      return (i + (v - vs[i]) / (vs[i + 1] - vs[i])) * ds;
+    },
+  };
+}
+
+// ---------- precomputed effects ----------
+function buildFx() {
+  const rng = mulberry32(SIM.seed * 7919 + 17);
+  FX = { frags: [], sparks: [], waves: [] };
+  for (const e of BREAKS) {
+    const ring = RINGS[e.ring], final = e.ring === N - 1;
+    const g = ring.theta0 + ring.omega * e.t;
+    const m = Math.round((final ? 2.2 : 1) * (20 + ring.r / 14));
+    const span = (TAU - ring.gap) / m;
+    for (let j = 0; j < m; j++) {
+      const a = g + ring.gap / 2 + span * (j + 0.5);
+      const near = Math.exp(-Math.pow(wrap(a - e.angle), 2) / 0.5);
+      const vr = (130 + rng() * 230 + 560 * near) * (final ? 1.7 : 1);
+      const vt = ring.omega * ring.r + (rng() * 2 - 1) * 90;
+      FX.frags.push({
+        t0: e.t, ring: e.ring, final,
+        x: CX + Math.cos(a) * ring.r, y: CY + Math.sin(a) * ring.r,
+        vx: Math.cos(a) * vr - Math.sin(a) * vt, vy: Math.sin(a) * vr + Math.cos(a) * vt,
+        rot: a + Math.PI / 2, spin: (rng() * 2 - 1) * 11,
+        len: Math.min(44, span * ring.r * 0.8), life: (0.5 + rng() * 0.4) * (final ? 2.2 : 1),
+      });
+    }
+    const k = final ? 170 : 36;
+    for (let j = 0; j < k; j++) {
+      const a = rng() * TAU, sp = (160 + rng() * 640) * (final ? 1.6 : 1);
+      FX.sparks.push({ t0: e.t, team: e.ball, x: e.x, y: e.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        size: 2 + rng() * 3.5, life: (0.35 + rng() * 0.5) * (final ? 2.2 : 1) });
+    }
+    FX.waves.push({ t0: e.t, team: e.ball, r: ring.r, final });
+  }
+}
+
+// What the HUD shouts after each broken ring.
+function buildPops() {
+  POPS = []; SCORE_POPS = [[], []];
+  let lastLeader = -1, streakBall = -1, streak = 0;
+  BREAKS.forEach((e, k) => {
+    const [a, b] = e.score, leader = a > b ? 0 : b > a ? 1 : -1;
+    streak = e.ball === streakBall ? streak + 1 : 1; streakBall = e.ball;
+    const combo = k > 0 && BREAKS[k - 1].ball === e.ball && e.t - BREAKS[k - 1].t < 0.45;
+    let text = null;
+    if (k === N - 1) text = null;
+    else if (leader !== -1 && lastLeader !== -1 && leader !== lastLeader) text = 'ОБГОН!';
+    else if (leader === -1) text = 'НИЧЬЯ!';
+    else if (combo) text = 'КОМБО ×2';
+    else if (streak >= 3) text = `СЕРИЯ ×${streak}`;
+    if (leader !== -1) lastLeader = leader;
+    const v = WARP.v(e.t);
+    if (text) POPS.push({ v, text, team: e.ball });
+    SCORE_POPS[e.ball].push(v);
+  });
+  NEAR = [];
+  if (BREAKS[N - 2] && BREAKS[N - 2].score[0] === BREAKS[N - 2].score[1]) {
+    for (const e of BOUNCES) {
+      if (e.ring !== N - 1 || !e.cap || e.impact < 150 || e.t > S_FINAL - 0.3) continue;
+      if (NEAR.length && e.t - NEAR[NEAR.length - 1].t < 0.6) continue;
+      NEAR.push({ t: e.t, v: WARP.v(e.t), team: e.ball });
+      POPS.push({ v: WARP.v(e.t), text: 'ПОЧТИ!', team: e.ball });
+    }
+    POPS.sort((a, b) => a.v - b.v);
+  }
+}
+
+// Heartbeat over the deciding ring, quickening towards the escape; shared by picture and sound.
+function buildHearts() {
+  HEARTS = [];
+  if (V_DECIDER == null) return;
+  const slow = WARP.v(WARP.in0);
+  let v = V_DECIDER + 0.35;
+  while (v < V_FINAL - 0.25) {
+    HEARTS.push(v);
+    if (v < slow) v += 0.72 - 0.26 * clamp01((v - V_DECIDER) / Math.max(0.5, slow - V_DECIDER));
+    else v += 0.95;   // in slow motion the heart slows down with everything else
+  }
+}
+
+function buildConfetti() {
+  const rng = mulberry32(SIM.seed * 31 + 5);
+  const w = TEAM[SIM.winner];
+  const colors = [w.rgb, w.rgb, w.light, [255, 255, 255], GOLD];
+  CONFETTI = [];
+  for (let i = 0; i < 170; i++) {
+    CONFETTI.push({
+      x: rng() * W, y: -40 - rng() * 900, vy: 380 + rng() * 360, sway: 30 + rng() * 60, swayF: 1.5 + rng() * 2.5,
+      ph: rng() * TAU, rot: rng() * TAU, spin: (rng() * 2 - 1) * 9, w: 12 + rng() * 12, h: 7 + rng() * 7,
+      color: colors[Math.floor(rng() * colors.length)],
+    });
+  }
+}
+
+// story: the episode's own lines (hook, its subtitle, the last line of the end card)
+function setup(sim, story = {}) {
+  STORY = Object.assign({ hook: 'ЗАГАДАЙ ЦВЕТ', sub: 'и досмотри до конца', outro: 'реванш — в следующем видео' }, story);
+  SIM = sim; P = sim.params; RINGS = sim.rings; N = RINGS.length; CX = P.cx; CY = P.cy; BR = P.ballR;
+  BREAKS = sim.events.filter(e => e.type === 'break');
+  BOUNCES = sim.events.filter(e => e.type === 'bounce');
+  CLACKS = sim.events.filter(e => e.type === 'clack');
+  BOUNCE_T_BY_RING = RINGS.map((_, i) => BOUNCES.filter(e => e.ring === i).map(e => e.t));
+  S_FINAL = sim.tFinal;
+  WARP = buildWarp();
+  V_FINAL = WARP.v(S_FINAL);
+  const pre = BREAKS[N - 2];
+  V_DECIDER = pre && pre.score[0] === pre.score[1] ? WARP.v(pre.t) : null;
+  const fin = BREAKS[N - 1];
+  ZOOM = { v0: WARP.v(WARP.in0), v1: WARP.v(WARP.in0) + 0.9, v2: V_FINAL + 0.35, v3: V_FINAL + 1.0,
+    fx: CX + (fin.x - CX) * 0.5, fy: CY + (fin.y - CY) * 0.5 };
+  DURATION = Math.round((V_FINAL + 4.6) * FPS) / FPS;
+  // the winner's worst moment, shown on the end card when it makes the win a comeback
+  COMEBACK = null;
+  for (const e of BREAKS) {
+    const d = e.score[1 - sim.winner] - e.score[sim.winner];
+    if (d >= 3 && (!COMEBACK || d > COMEBACK.d)) COMEBACK = { d, score: e.score.slice() };
+  }
+  buildFx(); buildPops(); buildHearts(); buildConfetti();
+  return { FPS, DURATION, V_FINAL, winner: sim.winner, score: sim.score };
+}
+
+// ---------- sim state lookups ----------
+function ballPos(b, s) {
+  const tr = SIM.track, xs = tr.x[b], ys = tr.y[b];
+  const f = Math.max(0, Math.min(xs.length - 1.0001, s / tr.dt)), i = Math.floor(f), k = f - i;
+  return [xs[i] + (xs[i + 1] - xs[i]) * k, ys[i] + (ys[i + 1] - ys[i]) * k];
+}
+const brokenCount = s => lastAtOrBefore(BREAKS, s, e => e.t) + 1;
+function scoreAt(s) { const k = brokenCount(s); return k ? BREAKS[k - 1].score : [0, 0]; }
+function ringFlash(i, s) {
+  const arr = BOUNCE_T_BY_RING[i], j = lastAtOrBefore(arr, s);
+  return j < 0 ? 0 : Math.exp(-(s - arr[j]) / 0.09);
+}
+// gold → green → teal on the inner half, violet → purple on the outer half: never the balls' red or blue
+const ringHue = i => { const k = N > 1 ? i / (N - 1) : 0; return k <= 0.5 ? 45 + 125 * k / 0.5 : 262 + 38 * (k - 0.5) / 0.5; };
+
+// ---------- drawing ----------
+const grain = document.createElement('canvas');
+grain.width = W; grain.height = H;
+{
+  const g = grain.getContext('2d'), id = g.createImageData(W, H), rng = mulberry32(99);
+  for (let i = 0; i < id.data.length; i += 4) { const v = rng() * 255; id.data[i] = id.data[i + 1] = id.data[i + 2] = v; id.data[i + 3] = 10; }
+  g.putImageData(id, 0, 0);
+}
+function circle(x, y, r) { ctx.beginPath(); ctx.arc(x, y, Math.max(0, r), 0, TAU); }
+
+function drawBackground() {
+  const g = ctx.createRadialGradient(CX, CY, 30, CX, CY, 1300);
+  g.addColorStop(0, '#171c3d'); g.addColorStop(0.45, '#0c0f24'); g.addColorStop(1, '#040509');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+
+function drawRings(s, v) {
+  const k = brokenCount(s);
+  if (k >= N) return;
+  const decider = V_DECIDER != null && k === N - 1;
+  let beat = 0;
+  if (decider) for (const hv of HEARTS) if (v >= hv) beat = Math.max(beat, Math.exp(-(v - hv) / 0.14));
+  ctx.lineCap = 'round';
+  for (let i = N - 1; i >= k; i--) {
+    const ring = RINGS[i], cur = i === k;
+    const g = ring.theta0 + ring.omega * s;
+    const a0 = g + ring.gap / 2, a1 = g - ring.gap / 2 + TAU;
+    const fl = ringFlash(i, s);
+    ctx.beginPath(); ctx.arc(CX, CY, ring.r, a0, a1);
+    if (decider && cur) {
+      const pulse = 0.5 + 0.5 * Math.sin(v * TAU * 1.6);
+      ctx.strokeStyle = rgba(GOLD, 0.2 + 0.12 * pulse + 0.3 * beat + 0.3 * fl); ctx.lineWidth = 30 + 14 * beat; ctx.stroke();
+      ctx.strokeStyle = `rgba(255,${226 + 29 * fl | 0},${150 + 105 * fl | 0},1)`; ctx.lineWidth = 9 + 3 * beat + 3 * fl; ctx.stroke();
+      continue;
+    }
+    const h = ringHue(i);
+    ctx.strokeStyle = hsla(h, 95, 60, (cur ? 0.2 : 0.06) + 0.3 * fl); ctx.lineWidth = cur ? 24 : 14; ctx.stroke();
+    ctx.strokeStyle = hsla(h, 92, 62 + 30 * fl, cur ? 1 : 0.45 + 0.4 * fl); ctx.lineWidth = (cur ? 7 : 5) + 3 * fl; ctx.stroke();
+  }
+}
+
+function drawContacts(s) {
+  ctx.lineCap = 'round';
+  let j = lastAtOrBefore(BOUNCES, s, e => e.t);
+  for (; j >= 0 && s - BOUNCES[j].t < 0.3; j--) {
+    const e = BOUNCES[j], k = (s - e.t) / 0.3;
+    ctx.strokeStyle = rgba(TEAM[e.ball].light, 0.75 * (1 - k)); ctx.lineWidth = 4 * (1 - k) + 1;
+    circle(e.x, e.y, 6 + 30 * easeOut(k)); ctx.stroke();
+  }
+  for (let c = lastAtOrBefore(CLACKS, s, e => e.t); c >= 0 && s - CLACKS[c].t < 0.25; c--) {
+    const e = CLACKS[c], k = (s - e.t) / 0.25;
+    ctx.strokeStyle = `rgba(255,255,255,${0.6 * (1 - k)})`; ctx.lineWidth = 3 * (1 - k) + 1;
+    circle(e.x, e.y, 8 + 34 * easeOut(k)); ctx.stroke();
+  }
+}
+
+function drawShatter(s) {
+  const G = 1250, D = 1.5;
+  ctx.lineCap = 'round';
+  for (const f of FX.frags) {
+    const tau = s - f.t0;
+    if (tau < 0 || tau > f.life) continue;
+    const e = (1 - Math.exp(-D * tau)) / D;
+    const x = f.x + f.vx * e, y = f.y + f.vy * e + (G / D) * (tau - e);
+    const a = Math.pow(1 - tau / f.life, 1.4), r = f.rot + f.spin * tau, c = Math.cos(r) * f.len / 2, sn = Math.sin(r) * f.len / 2;
+    const hot = Math.exp(-tau / 0.12);
+    const col = f.final ? `rgba(255,${215 + 40 * a | 0},${120 + 100 * a | 0},${a})` : hsla(ringHue(f.ring), 95, 64 + 34 * hot, a);
+    ctx.strokeStyle = col; ctx.lineWidth = f.final ? 7 : 5;
+    ctx.beginPath(); ctx.moveTo(x - c, y - sn); ctx.lineTo(x + c, y + sn); ctx.stroke();
+  }
+  ctx.globalCompositeOperation = 'lighter';
+  for (const w of FX.waves) {
+    const life = w.final ? 0.9 : 0.32, tau = s - w.t0;
+    if (tau < 0 || tau > life) continue;
+    const k = tau / life;
+    ctx.strokeStyle = rgba(w.final ? [255, 255, 255] : TEAM[w.team].light, (w.final ? 0.85 : 0.4) * (1 - k) * (1 - k));
+    ctx.lineWidth = (w.final ? 26 : 9) * (1 - k) + 1;
+    circle(CX, CY, w.r + (w.final ? 1100 : 150) * easeOut(k)); ctx.stroke();
+  }
+  for (const p of FX.sparks) {
+    const tau = s - p.t0;
+    if (tau < 0 || tau > p.life) continue;
+    const e = (1 - Math.exp(-2.4 * tau)) / 2.4;
+    const x = p.x + p.vx * e, y = p.y + p.vy * e + 300 * (tau - e);
+    const a = 1 - tau / p.life;
+    ctx.fillStyle = rgba(TEAM[p.team].light, a); circle(x, y, p.size * (0.6 + 0.4 * a)); ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+function drawBall(b, s) {
+  const [x, y] = ballPos(b, s), t = TEAM[b];
+  const span = 0.14, steps = 28;
+  ctx.lineCap = 'round';
+  let prev = ballPos(b, Math.max(0, s - span));
+  for (let i = 1; i <= steps; i++) {
+    const q = ballPos(b, Math.max(0, s - span + span * i / steps)), f = i / steps;
+    ctx.strokeStyle = rgba(t.rgb, 0.5 * f * f); ctx.lineWidth = 3 + (2 * BR - 6) * f;
+    ctx.beginPath(); ctx.moveTo(prev[0], prev[1]); ctx.lineTo(q[0], q[1]); ctx.stroke();
+    prev = q;
+  }
+  const halo = ctx.createRadialGradient(x, y, BR * 0.6, x, y, BR * 3.4);
+  halo.addColorStop(0, rgba(t.rgb, 0.5)); halo.addColorStop(1, rgba(t.rgb, 0));
+  ctx.fillStyle = halo; circle(x, y, BR * 3.4); ctx.fill();
+  drawBallBody(x, y, BR, t);
+}
+function drawBallBody(x, y, r, t) {
+  const body = ctx.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.08, x, y, r);
+  body.addColorStop(0, '#ffffff'); body.addColorStop(0.3, rgba(t.light, 1)); body.addColorStop(1, rgba(t.rgb, 1));
+  ctx.fillStyle = body; circle(x, y, r); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.92)'; ctx.lineWidth = Math.max(2, r * 0.16); circle(x, y, r); ctx.stroke();
+}
+
+function drawPlusOnes(s) {
+  for (const e of BREAKS) {
+    const tau = s - e.t;
+    if (tau < 0 || tau > 0.9 || e.ring === N - 1) continue;
+    const k = tau / 0.9, out = 40 + 70 * easeOut(k);
+    const x = e.x + Math.cos(e.angle) * out, y = e.y + Math.sin(e.angle) * out - 40 * k;
+    const sc = 0.6 + 0.6 * easeOutBack(Math.min(1, tau / 0.18));
+    ctx.save(); ctx.translate(x, y); ctx.scale(sc, sc); ctx.globalAlpha = 1 - Math.pow(k, 3);
+    label('+1', 0, 0, 64, rgba(TEAM[e.ball].light, 1), { stroke: 8 });
+    ctx.restore();
+  }
+}
+
+// Text with a dark outline so it reads over anything.
+function label(str, x, y, size, color, o = {}) {
+  ctx.font = `${o.weight || 900} ${size}px ${FONT}`;
+  if (o.maxW) { const w = ctx.measureText(str).width; if (w > o.maxW) { size = Math.floor(size * o.maxW / w); ctx.font = `${o.weight || 900} ${size}px ${FONT}`; } }
+  ctx.textAlign = o.align || 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+  if (o.stroke) { ctx.strokeStyle = o.strokeColor || 'rgba(5,6,14,0.9)'; ctx.lineWidth = o.stroke; ctx.strokeText(str, x, y); }
+  if (o.glow) { ctx.save(); ctx.shadowColor = o.glow; ctx.shadowBlur = o.glowBlur || 30; ctx.fillStyle = color; ctx.fillText(str, x, y); ctx.restore(); }
+  ctx.fillStyle = color; ctx.fillText(str, x, y);
+  return size;
+}
+
+function popScale(times, v, dur = 0.35, amp = 0.45) {
+  const j = lastAtOrBefore(times, v);
+  if (j < 0) return 1;
+  const k = (v - times[j]) / dur;
+  return k > 1 ? 1 : 1 + amp * Math.sin(Math.PI * k) * (1 - k);
+}
+
+function drawScoreboard(s, v) {
+  const sc = scoreAt(s), y = 478;
+  const lead = sc[0] > sc[1] ? 0 : sc[1] > sc[0] ? 1 : -1;
+  for (const b of [0, 1]) {
+    const side = b ? 1 : -1, t = TEAM[b];
+    const ballPop = popScale(SCORE_POPS[b], v, 0.4, 0.5);
+    drawBallIcon(540 + side * 318, y, 40 * ballPop, t);
+    const k = popScale(SCORE_POPS[b], v);
+    ctx.save(); ctx.translate(540 + side * 150, y + 6); ctx.scale(k, k);
+    label(String(sc[b]), 0, 0, 168, lead === b || lead === -1 ? '#ffffff' : 'rgba(255,255,255,0.62)', { stroke: 14, glow: lead === b ? rgba(t.rgb, 0.9) : null, glowBlur: 40 });
+    ctx.restore();
+  }
+  label(':', 540, y - 4, 130, 'rgba(255,255,255,0.75)', { stroke: 12 });
+}
+function drawBallIcon(x, y, r, t) {
+  const halo = ctx.createRadialGradient(x, y, r * 0.5, x, y, r * 2.2);
+  halo.addColorStop(0, rgba(t.rgb, 0.55)); halo.addColorStop(1, rgba(t.rgb, 0));
+  ctx.fillStyle = halo; circle(x, y, r * 2.2); ctx.fill();
+  drawBallBody(x, y, r, t);
+}
+
+function drawHeadline(s, v) {
+  // the hook leaves first, then the race status comes in: never both at once
+  const OUT = 0.22, IN = 0.3;
+  if (v < INTRO_END + OUT) {
+    const k = smooth(INTRO_END, INTRO_END + OUT, v), a = 1 - k, dy = -36 * k;
+    const bob = 1 + 0.025 * Math.sin(v * TAU * 1.2);
+    ctx.save(); ctx.globalAlpha = a; ctx.translate(540, 250 + dy); ctx.scale(bob, bob);
+    label(STORY.hook, 0, 0, 118, '#ffffff', { stroke: 16, maxW: 960 });
+    ctx.restore();
+    ctx.save(); ctx.globalAlpha = a;
+    label(STORY.sub, 540, 342 + dy, 58, '#d7dbff', { weight: 800, stroke: 10, maxW: 900 });
+    ctx.restore();
+  }
+  if (v < INTRO_END + OUT) return;
+  const k = brokenCount(s), left = N - k;
+  const a = smooth(INTRO_END + OUT, INTRO_END + OUT + IN, v) * (1 - smooth(V_FINAL - 0.05, V_FINAL + 0.2, v));
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = a;
+  if (left === 1 && V_DECIDER != null) {
+    const pop = easeOutBack((v - V_DECIDER) / 0.4), pulse = 1 + 0.035 * Math.sin(v * TAU * 1.6);
+    ctx.translate(540, 296); ctx.scale(pop * pulse, pop * pulse);
+    label('РЕШАЮЩЕЕ КОЛЬЦО', 0, 0, 84, rgba(GOLD, 1), { stroke: 14, glow: rgba(GOLD, 0.8), glowBlur: 36, maxW: 900 });
+  } else if (left > 0) {
+    const tChange = k ? WARP.v(BREAKS[k - 1].t) : -10, pop = popScale([tChange], v, 0.3, 0.18);
+    const sc = scoreAt(s), lead = sc[0] > sc[1] ? 0 : sc[1] > sc[0] ? 1 : -1;
+    ctx.translate(540, 296); ctx.scale(pop, pop);
+    if (lead !== -1 && sc[lead] === (N - 1) / 2) {
+      // one more ring and the leader has it won: the other side has to take every ring that is left
+      const t = TEAM[1 - lead];
+      const need = left === 2 ? 'ОБА КОЛЬЦА' : `ВСЕ ${left} ${plural(left, 'КОЛЬЦО', 'КОЛЬЦА', 'КОЛЕЦ')}`;
+      label(`${DATIVE[1 - lead]} НУЖНЫ`, 0, -46, 62, '#ffffff', { stroke: 12, maxW: 860 });
+      label(need, 0, 44, 98, rgba(t.light, 1), { stroke: 16, maxW: 860, glow: rgba(t.rgb, 0.9), glowBlur: 30 });
+    } else {
+      label(`ОСТАЛОСЬ ${left} ${plural(left, 'КОЛЬЦО', 'КОЛЬЦА', 'КОЛЕЦ')}`, 0, 0, 70, '#ffffff', { stroke: 12, maxW: 860 });
+    }
+  }
+  ctx.restore();
+}
+
+function drawPops(v) {
+  const j = lastAtOrBefore(POPS, v, p => p.v);
+  if (j < 0) return;
+  const p = POPS[j], k = v - p.v, life = 1.0;
+  if (k > life) return;
+  const sc = easeOutBack(k / 0.22), a = 1 - smooth(life - 0.25, life, k);
+  ctx.save(); ctx.globalAlpha = a; ctx.translate(540, 596); ctx.scale(sc, sc); ctx.rotate(-0.04);
+  label(p.text, 0, 0, 64, rgba(TEAM[p.team].light, 1), { stroke: 12, glow: rgba(TEAM[p.team].rgb, 0.9), glowBlur: 30 });
+  ctx.restore();
+}
+
+function drawVignette(v) {
+  let tension = 0;
+  if (V_DECIDER != null) tension = 0.45 * smooth(V_DECIDER, V_DECIDER + 0.6, v);
+  tension += 0.45 * (smooth(ZOOM.v0, ZOOM.v0 + 0.4, v) - smooth(V_FINAL, V_FINAL + 0.5, v));
+  if (tension <= 0.01) return;
+  const g = ctx.createRadialGradient(540, 1000, 380, 540, 1000, 1150);
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, `rgba(0,0,0,${Math.min(0.85, tension)})`);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+
+function drawEndCard(v) {
+  const k = v - V_FINAL;
+  if (k < 0) return;
+  ctx.fillStyle = `rgba(255,255,255,${0.75 * Math.exp(-k / 0.11)})`; ctx.fillRect(0, 0, W, H);
+  if (k < 0.75) return;
+  const t = TEAM[SIM.winner];
+  ctx.fillStyle = `rgba(3,4,10,${0.66 * easeOut((k - 0.75) / 0.45)})`; ctx.fillRect(0, 0, W, H);
+  drawScoreboard(WARP.s(v), v);
+  const p1 = (k - 0.85) / 0.3, p2 = (k - 1.0) / 0.35;
+  if (p1 > 0) {
+    ctx.save(); ctx.globalAlpha = clamp01(p1 * 2); ctx.translate(540, 720); const s1 = easeOutBack(p1); ctx.scale(s1, s1);
+    label('ПОБЕДИЛ', 0, 0, 104, '#ffffff', { stroke: 14 });
+    ctx.restore();
+  }
+  if (p2 > 0) {
+    const throb = 1 + 0.03 * Math.sin((k - 1.0) * TAU * 1.3);
+    ctx.save(); ctx.globalAlpha = clamp01(p2 * 2); ctx.translate(540, 880); const s2 = easeOutBack(p2) * throb; ctx.scale(s2, s2);
+    label(t.name + '!', 0, 0, 200, rgba(t.light, 1), { stroke: 18, glow: rgba(t.rgb, 1), glowBlur: 60, maxW: 900 });
+    ctx.restore();
+  }
+  const pc = (k - 1.3) / 0.3;
+  if (COMEBACK && pc > 0) {
+    ctx.save(); ctx.globalAlpha = clamp01(pc * 2); ctx.translate(540, 1035); const s3 = easeOutBack(pc); ctx.scale(s3, s3); ctx.rotate(-0.03);
+    label(`КАМБЭК С ${COMEBACK.score[0]}:${COMEBACK.score[1]}`, 0, 0, 70, rgba(GOLD, 1), { stroke: 12, glow: rgba(GOLD, 0.7), glowBlur: 28 });
+    ctx.restore();
+  }
+  const r = 52 * easeOutBack((k - 1.15) / 0.4);
+  if (r > 0) drawBallIcon(540, COMEBACK ? 1160 : 1080, r, t);
+  const p3 = (k - 1.75) / 0.3;
+  if (p3 > 0) {
+    ctx.save(); ctx.globalAlpha = clamp01(p3 * 1.5); ctx.translate(540, 1290 + 30 * (1 - easeOut(p3)));
+    label('Ты угадал?', 0, 0, 84, '#ffffff', { stroke: 14 });
+    ctx.restore();
+  }
+  const p4 = (k - 2.15) / 0.3;
+  if (p4 > 0) {
+    ctx.save(); ctx.globalAlpha = clamp01(p4 * 1.5); ctx.translate(540, 1385 + 24 * (1 - easeOut(p4)));
+    label('Пиши в комменты свой цвет', 0, 0, 52, '#e2e5ff', { weight: 800, stroke: 10, maxW: 820 });
+    ctx.restore();
+  }
+  const p5 = (k - 2.6) / 0.3;
+  if (p5 > 0) {
+    ctx.save(); ctx.globalAlpha = clamp01(p5 * 1.5) * 0.9; ctx.translate(540, 1462);
+    label(STORY.outro, 0, 0, 44, '#b9bfe8', { weight: 700, stroke: 8, maxW: 800 });
+    ctx.restore();
+  }
+}
+
+function drawConfetti(v) {
+  const k = v - V_FINAL - 0.05;
+  if (k < 0) return;
+  for (const c of CONFETTI) {
+    const y = c.y + c.vy * k;
+    if (y < -60 || y > H + 60) continue;
+    const x = c.x + Math.sin(c.ph + k * c.swayF) * c.sway, r = c.rot + c.spin * k;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(r); ctx.scale(1, Math.abs(Math.cos(c.ph + k * 4)) * 0.8 + 0.2);
+    ctx.fillStyle = rgba(c.color, 0.95); ctx.fillRect(-c.w / 2, -c.h / 2, c.w, c.h);
+    ctx.restore();
+  }
+}
+
+function drawFrame(v) {
+  const s = WARP.s(v);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  drawBackground();
+
+  // camera: shake on every break, slow push-in towards the deciding escape
+  let sx = 0, sy = 0;
+  for (const e of BREAKS) {
+    const tau = s - e.t;
+    if (tau < 0 || tau > 0.45) continue;
+    const amp = (e.ring === N - 1 ? 22 : 7) * Math.exp(-tau / 0.11);
+    sx += amp * Math.sin(tau * 93 + e.ring); sy += amp * Math.cos(tau * 77 + e.ring * 2);
+  }
+  const z = 1 + 0.17 * (smooth(ZOOM.v0, ZOOM.v1, v) - smooth(ZOOM.v2, ZOOM.v3, v));
+  ctx.setTransform(z, 0, 0, z, ZOOM.fx * (1 - z) + sx, ZOOM.fy * (1 - z) + sy);
+  drawRings(s, v);
+  drawContacts(s);
+  drawShatter(s);
+  drawBall(0, s); drawBall(1, s);
+  drawPlusOnes(s);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  drawVignette(v);
+  drawHeadline(s, v);
+  drawScoreboard(s, v);
+  drawPops(v);
+  drawEndCard(v);
+  drawConfetti(v);
+  ctx.drawImage(grain, 0, 0);
+}
+
+// ---------- audio ----------
+// "In the Hall of the Mountain King" (Grieg, 1875, public domain), first eight bars.
+// Every wall bounce plays the next note, so the race itself performs the tune.
+const THEME = [
+  [59, 0], [61, 0], [62, 0], [64, 0], [66, 0], [62, 0], [66, 1],
+  [65, 0], [61, 0], [65, 1],
+  [64, 0], [60, 0], [64, 1],
+  [59, 0], [61, 0], [62, 0], [64, 0], [66, 0], [62, 0], [66, 0], [71, 1],
+  [69, 0], [66, 0], [62, 0], [66, 0], [69, 1],
+];
+const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+
+async function renderAudio() {
+  const SR = 48000;
+  const ac = new OfflineAudioContext(2, Math.ceil(SR * (DURATION + 0.1)), SR);
+  const comp = ac.createDynamicsCompressor();
+  comp.threshold.value = -14; comp.knee.value = 6; comp.ratio.value = 5; comp.attack.value = 0.002; comp.release.value = 0.15;
+  comp.connect(ac.destination);
+  const master = ac.createGain(); master.gain.value = 0.7; master.connect(comp);
+  master.gain.setValueAtTime(0.7, DURATION - 0.5); master.gain.linearRampToValueAtTime(0, DURATION);
+  const verb = ac.createConvolver(); verb.buffer = makeIR(ac, 2.4);
+  const wet = ac.createGain(); wet.gain.value = 0.32; verb.connect(wet); wet.connect(master);
+  const noise = makeNoise(ac, 3);
+  const rng = mulberry32(SIM.seed + 4242);
+
+  function bus(pan = 0, send = 0) {
+    const g = ac.createGain();
+    const p = ac.createStereoPanner(); p.pan.value = Math.max(-1, Math.min(1, pan));
+    g.connect(p); p.connect(master);
+    if (send) { const sg = ac.createGain(); sg.gain.value = send; p.connect(sg); sg.connect(verb); }
+    return g;
+  }
+  // percussive envelope: fast attack, exponential decay to -60 dB after t60 seconds
+  function hit(param, t, peak, attack, t60) {
+    param.setValueAtTime(0, t); param.linearRampToValueAtTime(peak, t + attack);
+    param.setTargetAtTime(0, t + attack, t60 / 6.9);
+  }
+  function tone(dest, type, f, t, peak, attack, t60, detune = 0) {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.value = f; o.detune.value = detune;
+    hit(g.gain, t, peak, attack, t60); o.connect(g); g.connect(dest);
+    o.start(t); o.stop(t + attack + t60 * 1.1 + 0.05);
+    return o;
+  }
+  function noiseHit(dest, t, peak, t60, filter, freq, q = 1) {
+    const n = ac.createBufferSource(); n.buffer = noise;
+    const f = ac.createBiquadFilter(); f.type = filter; f.frequency.value = freq; f.Q.value = q;
+    const g = ac.createGain(); hit(g.gain, t, peak, 0.001, t60);
+    n.connect(f); f.connect(g); g.connect(dest);
+    n.start(t, rng() * 2); n.stop(t + t60 * 1.1 + 0.05);
+    return f;
+  }
+
+  // a marimba-like mallet voice; later in the race it gets an octave bell and a pizzicato bass
+  function mallet(t, midi, vel, pan, layers) {
+    const f = mtof(midi), out = bus(pan, 0.28);
+    out.gain.value = vel;
+    tone(out, 'sine', f, t, 0.55, 0.002, midi < 64 ? 1.2 : 0.9);
+    tone(out, 'sine', f * 3.93, t, 0.16, 0.001, 0.16);
+    tone(out, 'sine', f * 9.6, t, 0.04, 0.0005, 0.04);
+    noiseHit(out, t, 0.05, 0.012, 'bandpass', 2600, 1.2);
+    if (layers > 0) { tone(out, 'sine', f * 2, t, 0.16, 0.002, 0.7); tone(out, 'sine', f * 5.4, t, 0.03, 0.001, 0.2); }
+    if (layers > 1) {
+      const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900; lp.connect(out);
+      tone(lp, 'triangle', f / 2, t, 0.42, 0.003, 0.42);
+    }
+  }
+  function clack(t, vel, pan) {
+    const out = bus(pan, 0.12); out.gain.value = vel;
+    noiseHit(out, t, 0.35, 0.03, 'bandpass', 1900, 3);
+    tone(out, 'sine', 1250, t, 0.14, 0.0008, 0.035);
+  }
+  function shatter(t, vel, pan, big) {
+    const out = bus(pan * 0.6, big ? 0.55 : 0.4); out.gain.value = vel;
+    noiseHit(out, t, big ? 0.65 : 0.38, big ? 1.4 : 0.45, 'highpass', 2400, 0.7);
+    for (let i = 0; i < (big ? 9 : 5); i++) tone(out, 'sine', 2600 + rng() * 4600, t + rng() * 0.03, 0.05, 0.001, 0.08 + rng() * 0.3);
+    const th = tone(out, 'sine', 150, t, big ? 0.9 : 0.55, 0.002, big ? 0.6 : 0.3);
+    th.frequency.setValueAtTime(150, t); th.frequency.exponentialRampToValueAtTime(48, t + 0.22);
+  }
+  function ping(t, team) {
+    const out = bus(team ? 0.35 : -0.35, 0.4);
+    const a = team ? 78 : 83;                     // F#5 / B5
+    tone(out, 'sine', mtof(a), t, 0.07, 0.002, 0.35);
+    tone(out, 'sine', mtof(a + 7), t + 0.07, 0.07, 0.002, 0.45);
+  }
+  function heart(t, vel, slow) {
+    const out = bus(0, slow ? 0.25 : 0.05); out.gain.value = vel;
+    const p = slow ? 0.8 : 1, gap = slow ? 0.3 : 0.19, len = slow ? 1.6 : 1;
+    const o = tone(out, 'sine', 64 * p, t, 0.95, 0.004, 0.32 * len);
+    o.frequency.setValueAtTime(78 * p, t); o.frequency.exponentialRampToValueAtTime(48 * p, t + 0.16 * len);
+    const o2 = tone(out, 'sine', 58 * p, t + gap, 0.6, 0.004, 0.28 * len);
+    o2.frequency.setValueAtTime(70 * p, t + gap); o2.frequency.exponentialRampToValueAtTime(44 * p, t + gap + 0.15 * len);
+  }
+  function riser(t0, t1) {   // noise and a climbing tone pulling into the final escape
+    const n = ac.createBufferSource(); n.buffer = noise;
+    const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.Q.value = 0.8;
+    hp.frequency.setValueAtTime(200, t0); hp.frequency.exponentialRampToValueAtTime(5000, t1);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.004, t0); g.gain.exponentialRampToValueAtTime(0.3, t1 - 0.02); g.gain.linearRampToValueAtTime(0, t1 + 0.03);
+    const out = bus(0, 0.4); n.connect(hp); hp.connect(g); g.connect(out);
+    n.start(t0, rng()); n.stop(t1 + 0.05);
+    const o = ac.createOscillator(); o.type = 'triangle';
+    o.frequency.setValueAtTime(mtof(47), t0); o.frequency.exponentialRampToValueAtTime(mtof(83), t1);
+    const og = ac.createGain();
+    og.gain.setValueAtTime(0.002, t0); og.gain.exponentialRampToValueAtTime(0.09, t1 - 0.02); og.gain.linearRampToValueAtTime(0, t1 + 0.03);
+    o.connect(og); og.connect(out); o.start(t0); o.stop(t1 + 0.05);
+  }
+  function whoosh(t0, t1, from, to, peak) {
+    const n = ac.createBufferSource(); n.buffer = noise;
+    const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 1.3;
+    f.frequency.setValueAtTime(from, t0); f.frequency.exponentialRampToValueAtTime(to, t1);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(peak, t0 + (t1 - t0) * 0.6); g.gain.exponentialRampToValueAtTime(0.0001, t1);
+    const out = bus(0, 0.5); n.connect(f); f.connect(g); g.connect(out);
+    n.start(t0, rng()); n.stop(t1 + 0.05);
+  }
+  function drone(t0, t1) {   // low tremolo on the dominant under the deciding ring
+    const out = bus(0, 0.3);
+    const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(380, t0); lp.frequency.linearRampToValueAtTime(1400, t1);
+    const trem = ac.createGain(); trem.gain.value = 0.5;
+    const lfo = ac.createOscillator(); lfo.frequency.value = 9; const lg = ac.createGain(); lg.gain.value = 0.5;
+    lfo.connect(lg); lg.connect(trem.gain); lfo.start(t0); lfo.stop(t1 + 0.3);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(0.05, t0 + 0.4); g.gain.linearRampToValueAtTime(0.17, t1 - 0.05); g.gain.linearRampToValueAtTime(0, t1 + 0.12);
+    lp.connect(trem); trem.connect(g); g.connect(out);
+    for (const [m, d] of [[42, -6], [42, 6], [54, 0], [49, -4]]) {
+      const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mtof(m); o.detune.value = d;
+      const og = ac.createGain(); og.gain.value = 0.25; o.connect(og); og.connect(lp); o.start(t0); o.stop(t1 + 0.3);
+    }
+  }
+  function boom(t) {
+    const out = bus(0, 0.35);
+    const o = tone(out, 'sine', 90, t, 1.0, 0.003, 2.4);
+    o.frequency.setValueAtTime(95, t); o.frequency.exponentialRampToValueAtTime(30, t + 1.4);
+  }
+  function chord(t0, t1) {   // B major: the minor tune resolves to a bright ending
+    const out = bus(0, 0.6);
+    const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(3200, t0); lp.frequency.exponentialRampToValueAtTime(900, t1);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(1, t0 + 0.05);
+    g.gain.setTargetAtTime(0.45, t0 + 0.3, 0.6); g.gain.setTargetAtTime(0.0001, t1 - 0.6, 0.25);
+    lp.connect(g); g.connect(out);
+    for (const m of [35, 47, 54, 59, 63, 66, 71, 75]) for (const d of [-7, 7]) {
+      const o = ac.createOscillator(); o.type = m < 50 ? 'triangle' : 'sawtooth'; o.frequency.value = mtof(m); o.detune.value = d;
+      const og = ac.createGain(); og.gain.value = m < 50 ? 0.11 : 0.032; o.connect(og); og.connect(lp); o.start(t0); o.stop(t1);
+    }
+  }
+  function bells(t, notes, step, peak = 0.1) {
+    notes.forEach((m, i) => {
+      const out = bus((i % 2 ? 0.3 : -0.3), 0.6);
+      tone(out, 'sine', mtof(m), t + i * step, peak, 0.002, 1.2);
+      tone(out, 'sine', mtof(m) * 2.76, t + i * step, peak * 0.25, 0.001, 0.3);
+    });
+  }
+
+  let idx = 0, lastNote = -1, notes = 0;
+  for (const e of BOUNCES) {
+    if (e.impact < 140) continue;
+    const v = WARP.v(e.t);
+    if (v - lastNote < 0.06) continue;
+    lastNote = v;
+    const loop = Math.floor(idx / THEME.length), [m, acc] = THEME[idx % THEME.length];
+    const broken = BREAKS.filter(b => b.t <= e.t).length;
+    const layers = broken >= 10 ? 2 : loop >= 1 || broken >= 5 ? 1 : 0;
+    const shift = loop >= 2 || broken >= 10 ? 12 : 0;
+    const vel = (0.38 + 0.62 * clamp01((e.impact - 140) / 1100)) * (acc ? 1.15 : 1);
+    mallet(v, m + shift, vel, (e.x - CX) / P.rOut * 0.7, layers);
+    idx++; notes++;
+  }
+  for (const e of CLACKS) if (e.impact > 60) clack(WARP.v(e.t), 0.35 + 0.65 * clamp01(e.impact / 1200), (e.x - CX) / P.rOut * 0.7);
+  BREAKS.forEach((e, k) => {
+    const v = WARP.v(e.t), final = k === N - 1;
+    shatter(v, final ? 1 : 0.8, (e.x - CX) / P.rOut, final);
+    if (!final) ping(v + 0.02, e.ball);
+  });
+  HEARTS.forEach((v, i) => heart(v, 0.7 + 0.3 * clamp01(i / 6), v >= ZOOM.v0));
+  for (const n of NEAR) bells(n.v + 0.03, [84, 83], 0.09, 0.08);
+  if (V_DECIDER != null) drone(V_DECIDER + 0.1, V_FINAL);
+  whoosh(ZOOM.v0 - 0.1, ZOOM.v0 + 0.8, 4200, 220, 0.4);
+  riser(V_FINAL - 1.6, V_FINAL);
+  boom(V_FINAL);
+  chord(V_FINAL, DURATION);
+  bells(V_FINAL + 0.95, [83, 87, 90, 95], 0.08, 0.09);
+  bells(V_FINAL + 1.8, [90, 95], 0.12, 0.07);
+
+  const buf = await ac.startRendering();
+  return { wav: encodeWav(buf), notes };
+}
+function makeNoise(ac, sec) {
+  const b = ac.createBuffer(1, Math.floor(ac.sampleRate * sec), ac.sampleRate), d = b.getChannelData(0), rng = mulberry32(7);
+  for (let i = 0; i < d.length; i++) d[i] = rng() * 2 - 1;
+  return b;
+}
+function makeIR(ac, sec) {
+  const len = Math.floor(ac.sampleRate * sec), b = ac.createBuffer(2, len, ac.sampleRate), rng = mulberry32(11);
+  for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (rng() * 2 - 1) * Math.pow(1 - i / len, 3.2); }
+  return b;
+}
+function encodeWav(buf) {
+  const ch = buf.numberOfChannels, len = buf.length, sr = buf.sampleRate, data = [];
+  for (let c = 0; c < ch; c++) data.push(buf.getChannelData(c));
+  let peak = 0;
+  for (const d of data) for (let i = 0; i < len; i++) peak = Math.max(peak, Math.abs(d[i]));
+  const gain = peak > 0 ? 0.89 / peak : 1;
+  const bytes = new ArrayBuffer(44 + len * ch * 2), dv = new DataView(bytes);
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, 'RIFF'); dv.setUint32(4, 36 + len * ch * 2, true); str(8, 'WAVE'); str(12, 'fmt ');
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, ch, true); dv.setUint32(24, sr, true);
+  dv.setUint32(28, sr * ch * 2, true); dv.setUint16(32, ch * 2, true); dv.setUint16(34, 16, true); str(36, 'data'); dv.setUint32(40, len * ch * 2, true);
+  let o = 44;
+  for (let i = 0; i < len; i++) for (let c = 0; c < ch; c++) {
+    const x = Math.max(-1, Math.min(1, data[c][i] * gain));
+    dv.setInt16(o, x < 0 ? x * 0x8000 : x * 0x7fff, true); o += 2;
+  }
+  const u8 = new Uint8Array(bytes);
+  let bin = '';
+  for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+window.setup = setup;
+window.renderAudio = renderAudio;
+window.frameJPEG = v => { drawFrame(v); return cv.toDataURL('image/jpeg', 0.93).split(',')[1]; };
+window.framePNG = v => { drawFrame(v); return cv.toDataURL('image/png').split(',')[1]; };
+window.ready = document.fonts.load(`900 100px ${FONT}`).then(() => document.fonts.load(`800 50px ${FONT}`))
+  .then(() => ({ font: document.fonts.check(`900 100px "Inter Display"`) }));
+</script>
+</body>
+</html>

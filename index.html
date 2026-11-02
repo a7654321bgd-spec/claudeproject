@@ -1,0 +1,508 @@
+<title>Ночная смена баклажана</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik+Mono+One&family=Nunito:wght@500;700;900&display=swap">
+<style>
+/* Layout: one-screen arcade. A thin HUD bar over a full-bleed night room drawn on canvas. Single dark world on purpose. */
+:root {
+  --night: #140b22;
+  --plum: #2a1640;
+  --plum-hi: #3b2159;
+  --monitor: #5fd0ff;
+  --cherry: #ff3d5a;
+  --berry: #7b86ff;
+  --glow: #ffd36b;
+  --ink: #f3ecff;
+  --muted: #b3a5cf;
+  --f-display: "Rubik Mono One", "Arial Black", system-ui, sans-serif;
+  --f-body: "Nunito", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: var(--night); color: var(--ink); font-family: var(--f-body); overflow: hidden; }
+.app {
+  box-sizing: border-box; height: 100%;
+  display: flex; flex-direction: column; gap: 10px;
+  padding-block: 12px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+header { display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap; }
+h1 { font-family: var(--f-display); font-weight: 400; font-size: clamp(13px, 3vw, 19px); margin: 0; letter-spacing: .02em; text-wrap: balance; }
+h1 span { color: var(--cherry); }
+.hud { display: flex; gap: 8px; align-items: center; font-weight: 900; font-variant-numeric: tabular-nums; }
+.chip { background: var(--plum); border-radius: 999px; padding: 6px 12px; font-size: 14px; white-space: nowrap; }
+.chip b { color: var(--glow); }
+.lives { color: var(--cherry); letter-spacing: 2px; }
+button { font: inherit; cursor: pointer; }
+.icon-btn { background: var(--plum); color: var(--ink); border: 0; border-radius: 999px; padding: 6px 12px; font-weight: 700; font-size: 14px; }
+.icon-btn:hover { background: var(--plum-hi); }
+.icon-btn:focus-visible, .cta:focus-visible { outline: 3px solid var(--glow); outline-offset: 2px; }
+.stage { position: relative; flex: 1; min-height: 0; border-radius: 18px; overflow: hidden; background: var(--plum); }
+canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+.overlay {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; text-align: center; padding: 24px;
+  background: color-mix(in srgb, var(--night) 70%, transparent);
+}
+.overlay[hidden] { display: none; }
+.overlay h2 { font-family: var(--f-display); font-weight: 400; font-size: clamp(22px, 6vw, 40px); margin: 0; line-height: 1.1; text-wrap: balance; max-width: 18ch; }
+.overlay h2 em { font-style: normal; color: var(--berry); }
+.overlay p { margin: 0; max-width: 46ch; color: var(--muted); font-size: 16px; line-height: 1.5; }
+.overlay .hint { font-size: 13px; letter-spacing: .04em; }
+.cta {
+  font-family: var(--f-display); font-size: 15px; letter-spacing: .04em;
+  background: var(--cherry); color: var(--night); border: 0; border-radius: 999px; padding: 14px 28px;
+  box-shadow: 0 6px 0 color-mix(in srgb, var(--cherry) 55%, var(--night));
+  transition: transform .08s;
+}
+.cta:active { transform: translateY(3px); box-shadow: 0 3px 0 color-mix(in srgb, var(--cherry) 55%, var(--night)); }
+@media (prefers-reduced-motion: reduce) { .cta { transition: none; } }
+</style>
+
+<div class="app">
+  <header>
+    <h1>Ночная смена <span>баклажана</span></h1>
+    <div class="hud">
+      <div class="chip">Искры <b id="score">0</b>/20</div>
+      <div class="chip lives" id="lives" aria-label="Жизни">♥♥♥</div>
+      <button class="icon-btn" id="mute" type="button" aria-pressed="false">Звук: вкл</button>
+    </div>
+  </header>
+  <div class="stage">
+    <canvas id="cv" aria-label="Игровое поле: фея-черешня собирает искры и уворачивается от наушников"></canvas>
+    <div class="overlay" id="overlay">
+      <h2 id="ov-title">Ночная смена баклажана</h2>
+      <p id="ov-text">Баклажан из ПВЗ проигрывает катку и швыряется наушниками. Ты фея-черешня: собери 20 искр, увернись от наушников и исполни его желание.</p>
+      <p class="hint" id="ov-hint">Палец или мышь, чтобы лететь. Стрелки и WASD тоже работают.</p>
+      <button class="cta" id="start" type="button">Взлететь</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const GOAL = 20;
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  const $ = id => document.getElementById(id);
+  const overlay = $('overlay'), ovTitle = $('ov-title'), ovText = $('ov-text'), ovHint = $('ov-hint'), startBtn = $('start');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const C = { cherry: css('--cherry'), berry: css('--berry'), glow: css('--glow'), monitor: css('--monitor'), ink: css('--ink'), night: css('--night'), plum: css('--plum') };
+
+  let W = 0, H = 0, s = 1;
+  function resize() {
+    const r = cv.getBoundingClientRect();
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    W = r.width; H = r.height; s = Math.max(0.55, Math.min(W, H) / 560);
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  new ResizeObserver(resize).observe(cv);
+  resize();
+
+  // ---------- sound ----------
+  let ac = null, muted = false;
+  function beep(freq, dur, type = 'sine', vol = 0.08, slide = 0) {
+    if (!ac || muted) return;
+    const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime;
+    o.type = type; o.frequency.setValueAtTime(freq, t);
+    if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, freq + slide), t + dur);
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(ac.destination); o.start(t); o.stop(t + dur);
+  }
+  $('mute').addEventListener('click', e => {
+    muted = !muted;
+    e.currentTarget.textContent = muted ? 'Звук: выкл' : 'Звук: вкл';
+    e.currentTarget.setAttribute('aria-pressed', String(muted));
+  });
+
+  // ---------- input ----------
+  const keys = {};
+  addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if (e.key.startsWith('Arrow')) e.preventDefault(); });
+  addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+  function pointer(e) {
+    if (!S || S.mode !== 'play') return;
+    const r = cv.getBoundingClientRect();
+    S.fairy.tx = e.clientX - r.left; S.fairy.ty = e.clientY - r.top;
+  }
+  cv.addEventListener('pointermove', pointer);
+  cv.addEventListener('pointerdown', pointer);
+
+  // ---------- state ----------
+  const RAGE = ['ЛАГАЕТ!!', 'КТО ТАК ИГРАЕТ?!', 'Меня всё достало!', 'Пинг 999!', 'Опять слили катку!', 'Это не моя посылка!'];
+  const HIT = ['ПОПАЛ!', 'Получай, ягода!', 'Не мешай играть!'];
+  let S = null;
+  let best = null;
+  try { best = Number(localStorage.getItem('egg-best')) || null; } catch (e) {}
+
+  function newGame() {
+    S = {
+      mode: 'play', t: 0, score: 0, lives: 3, shake: 0, morph: 0, lost: 0,
+      fairy: { x: W / 2, y: H * 0.35, tx: W / 2, ty: H * 0.35, inv: 0 },
+      egg: { x: W / 2, dir: 1, throwT: 1.4, bubble: null, form: 'egg' },
+      phones: [], sparks: [], parts: [], spawnT: 0.3,
+    };
+    hud();
+  }
+  function hud() {
+    $('score').textContent = S ? S.score : 0;
+    $('lives').textContent = S ? '♥'.repeat(S.lives) + '♡'.repeat(3 - S.lives) : '♥♥♥';
+  }
+  function say(text, dur = 1.6) { S.egg.bubble = { text, t: dur }; }
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+
+  function burst(x, y, color, n = 14, spd = 160) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, v = rnd(0.3, 1) * spd * s;
+      S.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: rnd(0.4, 0.9), max: 0.9, color, r: rnd(1.5, 3.5) * s });
+    }
+  }
+
+  // ---------- update ----------
+  function eggY() { return H - 96 * s; }
+  function update(dt) {
+    S.t += dt;
+    const f = S.fairy, egg = S.egg;
+    if (S.shake > 0) S.shake = Math.max(0, S.shake - dt * 30);
+    for (const p of S.parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 220 * s * dt; p.life -= dt; }
+    S.parts = S.parts.filter(p => p.life > 0);
+    if (egg.bubble && (egg.bubble.t -= dt) <= 0) egg.bubble = null;
+
+    if (S.mode === 'morph') {
+      S.morph += dt;
+      if (S.morph > 1.4 && egg.form === 'egg') {
+        egg.form = 'berry'; S.shake = reduce ? 0 : 14;
+        burst(egg.x, eggY() - 40 * s, C.glow, 60, 340); burst(egg.x, eggY() - 40 * s, C.berry, 40, 260);
+        beep(523, .15, 'triangle'); setTimeout(() => beep(659, .15, 'triangle'), 120); setTimeout(() => beep(784, .3, 'triangle'), 240);
+      }
+      if (S.morph > 2.1 && !egg.bubble) say('ЧТО, Я ФЕМБОЙЧИК?!', 9);
+      if (S.morph > 3.6) win();
+      f.x += (egg.x + 90 * s - f.x) * Math.min(1, dt * 3);
+      f.y += (eggY() - 160 * s - f.y) * Math.min(1, dt * 3);
+      return;
+    }
+    if (S.mode !== 'play') return;
+
+    // fairy
+    const k = 420 * s * dt;
+    if (keys['arrowleft'] || keys['a'] || keys['ф']) f.tx -= k;
+    if (keys['arrowright'] || keys['d'] || keys['в']) f.tx += k;
+    if (keys['arrowup'] || keys['w'] || keys['ц']) f.ty -= k;
+    if (keys['arrowdown'] || keys['s'] || keys['ы']) f.ty += k;
+    f.tx = Math.max(24 * s, Math.min(W - 24 * s, f.tx));
+    f.ty = Math.max(24 * s, Math.min(H - 190 * s, f.ty));
+    f.x += (f.tx - f.x) * Math.min(1, dt * 9);
+    f.y += (f.ty - f.y) * Math.min(1, dt * 9);
+    if (f.inv > 0) f.inv -= dt;
+
+    // eggplant patrols and throws
+    const lvl = S.score / GOAL;
+    egg.x += egg.dir * (60 + 90 * lvl) * s * dt;
+    if (egg.x < 90 * s) { egg.x = 90 * s; egg.dir = 1; }
+    if (egg.x > W - 90 * s) { egg.x = W - 90 * s; egg.dir = -1; }
+    egg.throwT -= dt;
+    if (egg.throwT <= 0) {
+      egg.throwT = rnd(0.9, 1.5) - lvl * 0.55;
+      const ox = egg.x, oy = eggY() - 70 * s;
+      const a = Math.atan2(f.y - oy, f.x - ox) + rnd(-0.18, 0.18);
+      const v = (230 + 170 * lvl) * s;
+      S.phones.push({ x: ox, y: oy, vx: Math.cos(a) * v, vy: Math.sin(a) * v, rot: 0, vr: rnd(6, 11) * (Math.random() < .5 ? -1 : 1) });
+      if (Math.random() < 0.45) say(pick(RAGE));
+      beep(180, .12, 'square', .04, -80);
+    }
+    for (const p of S.phones) { p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt; }
+    S.phones = S.phones.filter(p => p.x > -60 && p.x < W + 60 && p.y > -60 && p.y < H + 60);
+
+    // sparks
+    S.spawnT -= dt;
+    if (S.spawnT <= 0 && S.sparks.length < 5) {
+      S.spawnT = rnd(0.5, 0.9);
+      S.sparks.push({ x: rnd(36 * s, W - 36 * s), y: rnd(36 * s, H - 220 * s), life: 6, ph: Math.random() * 6 });
+    }
+    for (const sp of S.sparks) sp.life -= dt;
+    S.sparks = S.sparks.filter(sp => {
+      if (sp.life <= 0) return false;
+      if (Math.hypot(sp.x - f.x, sp.y - f.y) < 32 * s) {
+        S.score++; hud(); burst(sp.x, sp.y, C.glow, 12, 140);
+        beep(660 + S.score * 30, .09, 'triangle', .06);
+        if (S.score >= GOAL) startMorph();
+        return false;
+      }
+      return true;
+    });
+
+    // hits
+    if (f.inv <= 0) for (const p of S.phones) {
+      if (Math.hypot(p.x - f.x, p.y - f.y) < 30 * s) {
+        S.lives--; S.lost++; hud(); f.inv = 1.4; S.shake = reduce ? 0 : 10;
+        burst(f.x, f.y, C.cherry, 18, 200); beep(110, .25, 'sawtooth', .07, -50);
+        say(pick(HIT));
+        p.x = -999;
+        if (S.lives <= 0) gameOver();
+        break;
+      }
+    }
+  }
+
+  function startMorph() { S.mode = 'morph'; S.phones = []; S.sparks = []; S.egg.bubble = null; say('Хорошо, исполняй!', 1.3); }
+
+  // ---------- draw ----------
+  function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
+
+  function drawRoom() {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#1a0e2e'); g.addColorStop(1, '#2c1745');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // window with moon
+    const wx = W * 0.08, wy = 30 * s, ww = 110 * s, wh = 90 * s;
+    ctx.fillStyle = '#0e1530'; roundRect(wx, wy, ww, wh, 8 * s); ctx.fill();
+    ctx.fillStyle = '#f5ecc8'; ctx.beginPath(); ctx.arc(wx + ww * 0.68, wy + wh * 0.38, 14 * s, 0, 7); ctx.fill();
+    ctx.fillStyle = '#0e1530'; ctx.beginPath(); ctx.arc(wx + ww * 0.62, wy + wh * 0.33, 12 * s, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#3d2a5c'; ctx.lineWidth = 4 * s; roundRect(wx, wy, ww, wh, 8 * s); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(wx + ww / 2, wy); ctx.lineTo(wx + ww / 2, wy + wh); ctx.stroke();
+    // stack of parcels
+    const bx = W - 130 * s, by = H - 40 * s;
+    const boxes = [[0, 0, 100, 62], [10, -62, 80, 52], [24, -114, 54, 44]];
+    for (const [ox, oy, w, h] of boxes) {
+      const x = bx + ox * s, y = by + (oy - h) * s;
+      ctx.fillStyle = '#9a6a3c'; ctx.fillRect(x, y, w * s, h * s);
+      ctx.fillStyle = '#b8834f'; ctx.fillRect(x, y, w * s, 6 * s);
+      ctx.fillStyle = '#efe6d2'; ctx.fillRect(x + w * s * 0.15, y + h * s * 0.35, w * s * 0.5, h * s * 0.38);
+      ctx.fillStyle = '#2a1d10';
+      for (let i = 0; i < 9; i++) ctx.fillRect(x + w * s * 0.18 + i * w * s * 0.05, y + h * s * 0.42, (i % 3 ? 1 : 2) * s, h * s * 0.24);
+    }
+    // desk
+    ctx.fillStyle = '#3a2350'; ctx.fillRect(0, H - 44 * s, W, 44 * s);
+    ctx.fillStyle = '#4b2e66'; ctx.fillRect(0, H - 44 * s, W, 6 * s);
+  }
+
+  function drawMonitor(x, y) {
+    const glow = ctx.createRadialGradient(x, y, 4 * s, x, y, 140 * s);
+    glow.addColorStop(0, 'rgba(95,208,255,0.28)'); glow.addColorStop(1, 'rgba(95,208,255,0)');
+    ctx.fillStyle = glow; ctx.fillRect(x - 140 * s, y - 140 * s, 280 * s, 280 * s);
+    ctx.fillStyle = '#111'; roundRect(x - 44 * s, y - 30 * s, 88 * s, 58 * s, 5 * s); ctx.fill();
+    ctx.fillStyle = C.monitor; ctx.fillRect(x - 39 * s, y - 25 * s, 78 * s, 48 * s);
+    ctx.fillStyle = '#d0263f'; ctx.font = `900 ${10 * s}px Nunito, sans-serif`; ctx.textAlign = 'center';
+    ctx.fillText('ПОРАЖЕНИЕ', x, y + 3 * s);
+    ctx.fillStyle = '#111'; ctx.fillRect(x - 5 * s, y + 28 * s, 10 * s, 14 * s);
+  }
+
+  function eyes(x, y, lookX, lookY, angry, r = 9) {
+    for (const d of [-1, 1]) {
+      const ex = x + d * 15 * s;
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(ex, y, r * s, (r + 2) * s, 0, 0, 7); ctx.fill();
+      const a = Math.atan2(lookY - y, lookX - ex);
+      ctx.fillStyle = '#1b1024'; ctx.beginPath(); ctx.arc(ex + Math.cos(a) * 3.5 * s, y + Math.sin(a) * 3.5 * s, 4.2 * s, 0, 7); ctx.fill();
+      if (angry) {
+        ctx.strokeStyle = '#1b1024'; ctx.lineWidth = 4 * s; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(ex - d * 11 * s, y - 15 * s); ctx.lineTo(ex + d * 7 * s, y - 9 * s); ctx.stroke();
+      }
+    }
+  }
+
+  function drawEggplant(x, y, shouting) {
+    // body
+    const g = ctx.createRadialGradient(x - 18 * s, y - 50 * s, 6 * s, x, y - 30 * s, 80 * s);
+    g.addColorStop(0, '#9a5bd0'); g.addColorStop(1, '#41185f');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.ellipse(x, y - 22 * s, 56 * s, 58 * s, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x, y - 78 * s, 38 * s, 36 * s, 0, 0, 7); ctx.fill();
+    // cap
+    ctx.fillStyle = '#4c9a3c';
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = Math.PI + i * Math.PI / 5;
+      ctx.lineTo(x + Math.cos(a) * 34 * s, y - 108 * s - Math.sin(a) * 10 * s + 6 * s);
+      ctx.lineTo(x + Math.cos(a + 0.3) * 18 * s, y - 104 * s);
+    }
+    ctx.fill();
+    ctx.fillRect(x - 4 * s, y - 132 * s, 8 * s, 22 * s);
+    // vest with badge
+    ctx.fillStyle = '#ff8a1f';
+    ctx.beginPath(); ctx.moveTo(x - 50 * s, y - 40 * s); ctx.lineTo(x - 18 * s, y - 44 * s); ctx.lineTo(x - 22 * s, y + 20 * s); ctx.lineTo(x - 52 * s, y + 4 * s); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + 50 * s, y - 40 * s); ctx.lineTo(x + 18 * s, y - 44 * s); ctx.lineTo(x + 22 * s, y + 20 * s); ctx.lineTo(x + 52 * s, y + 4 * s); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.fillRect(x + 26 * s, y - 30 * s, 18 * s, 11 * s);
+    ctx.fillStyle = '#41185f'; ctx.fillRect(x + 28 * s, y - 27 * s, 14 * s, 2 * s); ctx.fillRect(x + 28 * s, y - 23 * s, 9 * s, 2 * s);
+    // face
+    eyes(x, y - 80 * s, S.fairy.x, S.fairy.y, true);
+    ctx.fillStyle = '#1b1024';
+    if (shouting) { ctx.beginPath(); ctx.ellipse(x, y - 56 * s, 13 * s, 9 * s, 0, 0, 7); ctx.fill(); ctx.fillStyle = '#d0263f'; ctx.beginPath(); ctx.ellipse(x, y - 52 * s, 7 * s, 4 * s, 0, 0, 7); ctx.fill(); }
+    else { ctx.strokeStyle = '#1b1024'; ctx.lineWidth = 4 * s; ctx.beginPath(); ctx.arc(x, y - 48 * s, 11 * s, 1.15 * Math.PI, 1.85 * Math.PI); ctx.stroke(); }
+  }
+
+  function drawBerry(x, y) {
+    const g = ctx.createLinearGradient(x - 34 * s, 0, x + 34 * s, 0);
+    g.addColorStop(0, '#3a43b8'); g.addColorStop(0.55, C.berry); g.addColorStop(1, '#2d3596');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.ellipse(x, y - 58 * s, 34 * s, 74 * s, 0, 0, 7); ctx.fill();
+    // bloom sheen
+    ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.beginPath(); ctx.ellipse(x - 12 * s, y - 86 * s, 9 * s, 26 * s, -0.2, 0, 7); ctx.fill();
+    // frilly skirt
+    ctx.fillStyle = '#ff9fc8';
+    ctx.beginPath(); ctx.moveTo(x - 36 * s, y - 20 * s);
+    for (let i = 0; i <= 6; i++) ctx.arc(x - 36 * s + i * 12 * s, y + 2 * s, 7 * s, Math.PI, 0, true);
+    ctx.lineTo(x + 36 * s, y - 20 * s); ctx.closePath(); ctx.fill();
+    // bow
+    ctx.fillStyle = '#ff5fa2';
+    ctx.beginPath(); ctx.moveTo(x, y - 132 * s); ctx.lineTo(x - 26 * s, y - 146 * s); ctx.lineTo(x - 24 * s, y - 120 * s); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x, y - 132 * s); ctx.lineTo(x + 26 * s, y - 146 * s); ctx.lineTo(x + 24 * s, y - 120 * s); ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y - 132 * s, 6 * s, 0, 7); ctx.fill();
+    // face
+    eyes(x, y - 92 * s, x, y + 200 * s, false, 10);
+    ctx.strokeStyle = '#1b1024'; ctx.lineWidth = 2.5 * s;
+    for (const d of [-1, 1]) for (let i = 0; i < 3; i++) {
+      const ex = x + d * 15 * s;
+      ctx.beginPath(); ctx.moveTo(ex + d * (4 + i * 4) * s, y - 103 * s); ctx.lineTo(ex + d * (7 + i * 6) * s, y - 111 * s); ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(255,120,170,0.55)';
+    ctx.beginPath(); ctx.ellipse(x - 24 * s, y - 76 * s, 7 * s, 4 * s, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x + 24 * s, y - 76 * s, 7 * s, 4 * s, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#c2185b'; ctx.beginPath(); ctx.ellipse(x, y - 66 * s, 7 * s, 10 * s, 0, 0, 7); ctx.fill();
+  }
+
+  function drawFairy(f) {
+    if (f.inv > 0 && Math.floor(f.inv * 12) % 2) return;
+    const flap = Math.sin(S.t * 22) * 0.35;
+    ctx.fillStyle = 'rgba(200,235,255,0.55)';
+    for (const d of [-1, 1]) {
+      ctx.save(); ctx.translate(f.x + d * 10 * s, f.y - 8 * s); ctx.rotate(d * (0.6 + flap));
+      ctx.beginPath(); ctx.ellipse(d * 16 * s, 0, 18 * s, 9 * s, 0, 0, 7); ctx.fill(); ctx.restore();
+    }
+    // stem and leaf
+    ctx.strokeStyle = '#3f8a35'; ctx.lineWidth = 3.5 * s; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(f.x, f.y - 20 * s); ctx.quadraticCurveTo(f.x + 4 * s, f.y - 40 * s, f.x + 14 * s, f.y - 46 * s); ctx.stroke();
+    ctx.fillStyle = '#58b24a'; ctx.beginPath(); ctx.ellipse(f.x + 20 * s, f.y - 42 * s, 9 * s, 4.5 * s, 0.5, 0, 7); ctx.fill();
+    // body
+    const g = ctx.createRadialGradient(f.x - 8 * s, f.y - 8 * s, 2 * s, f.x, f.y, 24 * s);
+    g.addColorStop(0, '#ff8a9a'); g.addColorStop(0.5, C.cherry); g.addColorStop(1, '#a3102b');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(f.x, f.y, 23 * s, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.beginPath(); ctx.ellipse(f.x - 9 * s, f.y - 10 * s, 5 * s, 3 * s, -0.6, 0, 7); ctx.fill();
+    // face
+    ctx.fillStyle = '#1b1024';
+    ctx.beginPath(); ctx.arc(f.x - 7 * s, f.y - 1 * s, 2.8 * s, 0, 7); ctx.arc(f.x + 7 * s, f.y - 1 * s, 2.8 * s, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#1b1024'; ctx.lineWidth = 2 * s;
+    ctx.beginPath(); ctx.arc(f.x + 1 * s, f.y + 5 * s, 5 * s, 0.15 * Math.PI, 0.75 * Math.PI); ctx.stroke();
+    // wand
+    ctx.strokeStyle = '#f1e2ff'; ctx.lineWidth = 2.5 * s;
+    ctx.beginPath(); ctx.moveTo(f.x + 18 * s, f.y + 8 * s); ctx.lineTo(f.x + 34 * s, f.y - 10 * s); ctx.stroke();
+    star(f.x + 36 * s, f.y - 13 * s, 7 * s, C.glow);
+  }
+
+  function star(x, y, r, color) {
+    ctx.fillStyle = color; ctx.beginPath();
+    for (let i = 0; i < 8; i++) {
+      const a = i * Math.PI / 4 - Math.PI / 2, rr = i % 2 ? r * 0.38 : r;
+      ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    }
+    ctx.fill();
+  }
+
+  function drawPhones(p) {
+    ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+    ctx.strokeStyle = '#2b2b33'; ctx.lineWidth = 5 * s;
+    ctx.beginPath(); ctx.arc(0, 2 * s, 15 * s, Math.PI * 1.05, Math.PI * 1.95); ctx.stroke();
+    ctx.fillStyle = '#1d1d24';
+    roundRect(-19 * s, -2 * s, 10 * s, 16 * s, 3 * s); ctx.fill();
+    roundRect(9 * s, -2 * s, 10 * s, 16 * s, 3 * s); ctx.fill();
+    ctx.fillStyle = C.monitor; ctx.fillRect(-16 * s, 4 * s, 4 * s, 4 * s); ctx.fillRect(12 * s, 4 * s, 4 * s, 4 * s);
+    ctx.restore();
+  }
+
+  function bubble(x, y, text) {
+    ctx.font = `900 ${Math.round(14 * s + 2)}px Nunito, sans-serif`;
+    const w = ctx.measureText(text).width + 22 * s, h = 30 * s;
+    const bx = Math.max(8, Math.min(W - w - 8, x - w / 2)), by = y - h;
+    ctx.fillStyle = C.ink; roundRect(bx, by, w, h, 12 * s); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x - 6 * s, by + h - 1); ctx.lineTo(x + 6 * s, by + h - 1); ctx.lineTo(x, by + h + 10 * s); ctx.fill();
+    ctx.fillStyle = C.night; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(text, bx + w / 2, by + h / 2 + 1); ctx.textBaseline = 'alphabetic';
+  }
+
+  function draw() {
+    ctx.save();
+    if (S && S.shake) ctx.translate(rnd(-S.shake, S.shake), rnd(-S.shake, S.shake));
+    drawRoom();
+    if (!S) { ctx.restore(); return; }
+    const egg = S.egg, ey = eggY();
+    drawMonitor(egg.x - 92 * s * (egg.x > W / 2 ? 1 : -1), H - 88 * s);
+    if (S.mode === 'morph' && S.morph < 1.4) {
+      const k = S.morph / 1.4;
+      drawEggplant(egg.x, ey, false);
+      const g = ctx.createRadialGradient(egg.x, ey - 50 * s, 0, egg.x, ey - 50 * s, 160 * s * k + 1);
+      g.addColorStop(0, `rgba(255,236,170,${0.95 * k})`); g.addColorStop(1, 'rgba(255,120,200,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(egg.x, ey - 50 * s, 160 * s * k + 1, 0, 7); ctx.fill();
+      if (!reduce) for (let i = 0; i < 10; i++) {
+        const a = S.t * 4 + i * Math.PI / 5, r = (90 - 50 * k) * s;
+        star(egg.x + Math.cos(a) * r, ey - 50 * s + Math.sin(a) * r, 6 * s, i % 2 ? C.glow : '#ff9fc8');
+      }
+    } else if (egg.form === 'berry') drawBerry(egg.x, ey);
+    else drawEggplant(egg.x, ey, !!egg.bubble);
+    // desk front edge over the body
+    ctx.fillStyle = '#3a2350'; ctx.fillRect(0, H - 44 * s, W, 44 * s);
+    ctx.fillStyle = '#4b2e66'; ctx.fillRect(0, H - 44 * s, W, 6 * s);
+
+    for (const sp of S.sparks) {
+      const pulse = 1 + Math.sin(S.t * 6 + sp.ph) * 0.18, fade = Math.min(1, sp.life);
+      ctx.globalAlpha = fade;
+      const g = ctx.createRadialGradient(sp.x, sp.y, 0, sp.x, sp.y, 22 * s);
+      g.addColorStop(0, 'rgba(255,211,107,0.55)'); g.addColorStop(1, 'rgba(255,211,107,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(sp.x, sp.y, 22 * s, 0, 7); ctx.fill();
+      star(sp.x, sp.y, 11 * s * pulse, C.glow);
+      ctx.globalAlpha = 1;
+    }
+    for (const p of S.phones) drawPhones(p);
+    drawFairy(S.fairy);
+    for (const p of S.parts) {
+      ctx.globalAlpha = Math.max(0, p.life / p.max); ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    if (egg.bubble) bubble(egg.x, ey - (egg.form === 'berry' ? 156 : 142) * s, egg.bubble.text);
+    ctx.restore();
+  }
+
+  // ---------- flow ----------
+  function show(title, text, hint, btn) {
+    ovTitle.innerHTML = title; ovText.textContent = text;
+    ovHint.textContent = hint; ovHint.hidden = !hint;
+    startBtn.textContent = btn; overlay.hidden = false; startBtn.focus();
+  }
+  function gameOver() {
+    S.mode = 'over';
+    setTimeout(() => show('Наушники победили', `Искр собрано: ${S.score} из ${GOAL}. Баклажан всё ещё злой и всё ещё в жилетке.`, '', 'Ещё раз'), 700);
+  }
+  function win() {
+    S.mode = 'win';
+    const time = Math.round(S.t);
+    let rec = '';
+    if (!best || time < best) { best = time; rec = ' Это новый рекорд.'; try { localStorage.setItem('egg-best', String(time)); } catch (e) {} }
+    else rec = ` Рекорд: ${best} сек.`;
+    show('ЧТО, Я <em>ФЕМБОЙЧИК?!</em>', `Желание исполнено за ${time} сек, потеряно сердечек: ${S.lost}.${rec} Жимолость ещё не решила, рада она или нет.`, '', 'Сыграть снова');
+  }
+  startBtn.addEventListener('click', () => {
+    if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    overlay.hidden = true; newGame(); cv.focus?.();
+  });
+
+  // demo scene behind the start screen
+  S = { mode: 'idle', t: 0, score: 0, lives: 3, shake: 0, morph: 0, lost: 0,
+        fairy: { x: W * 0.62, y: H * 0.32, tx: 0, ty: 0, inv: 0 },
+        egg: { x: W * 0.45, dir: 1, throwT: 9, bubble: { text: 'Меня всё достало!', t: 1e9 }, form: 'egg' },
+        phones: [{ x: W * 0.3, y: H * 0.4, vx: 0, vy: 0, rot: 0.6, vr: 0 }],
+        sparks: [{ x: W * 0.78, y: H * 0.22, life: 1e9, ph: 0 }, { x: W * 0.22, y: H * 0.18, life: 1e9, ph: 2 }],
+        parts: [], spawnT: 0 };
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    if (S) { if (S.mode === 'idle') S.t += dt; else update(dt); }
+    draw();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>

@@ -16,7 +16,7 @@
 | 9mice, Егор Крид, тёмный принц, madk1d — «Jealous» (`jealous.json`) | 3,84–22,02 с: отсчёт «three, two, one, jealous» и весь первый припев до обрыва | 113 | 18,17 с |
 | madk1d & VILLIAN — «8 миля» (`8mile.json`) | 49,99–78,79 с: два такта без баса и 16 тактов после его возвращения | 112 | 28,8 с |
 | Индия, Xcho, МОТ — «Шадэ» (Index-1 Radio Edit) (`shade.json`) | 16,84–49,34 с: два такта до возвращения баса и 16 после; хэты сплошные, поэтому удары только до восьмых | 127 | 32,5 с |
-| Kai Angel — «Andy Warhol» (`andy.json`) | 110,90–145,45 с: пауза без баса и 16 тактов после её конца | 168 | 34,55 с |
+| Kai Angel — «Andy Warhol» (`andy.json`) | 28,34–60,97 с: такт до припева и 16 тактов припева | 139 | 32,63 с |
 
 В «Jealous» отскок приходится на каждое слово отсчёта, перед припевом идёт дробь шестнадцатыми. Петля сходится сама: после обрыва «души ме…» снова начинается отсчёт.
 
@@ -59,8 +59,8 @@ node build.js --beats 8mile.json --track 8-миля.mp3 --out beat-bounce-8mile.
 python3 analyze.py шадэ.mp3 --out shade.json --drop 20.4 --finest 8
 node build.js --beats shade.json --track шадэ.mp3 --out beat-bounce-shade.mp4 --seed 11 --bound 1600,2000
 
-# «Andy Warhol»: дроп после паузы на 111–114 с; бочка на сетке, тарелка на 114,51 — подхват между долями
-python3 analyze.py andy-warhol.mp3 --out andy.json --drop 114.508
+# «Andy Warhol»: припев с 30,27 с (сильная доля, где поднимается громкость), такт до него
+python3 analyze.py andy-warhol.mp3 --out andy.json --drop 30.266 --before 1 --after 16
 node build.js --beats andy.json --track andy-warhol.mp3 --out beat-bounce-andy.mp4 --seed 7 --bound 1600,2000
 
 node build.js --preview 0,3.1,15                                # PNG-кадры в preview/, трек не нужен

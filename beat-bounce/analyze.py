@@ -127,6 +127,8 @@ def main(path, out='beats.json', drop_hint=None, bars_before=2, bars_after=16, f
     events = []
 
     def add(tt, kind, s):
+        if events and tt - start <= events[-1]['t'] + 1e-6:
+            return                                       # one hit per moment (the clip may open on the build bar)
         events.append({'t': round(tt - start, 5), 's': round(float(s), 3), 'kind': kind})
 
     # Every beat is a hit; between beats, an eighth or sixteenth is a hit when the drums really

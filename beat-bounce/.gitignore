@@ -3,3 +3,4 @@ preview/
 *.mp3
 # the video carries a copyrighted track, so it is delivered directly rather than published here
 beat-bounce.mp4
+__pycache__/

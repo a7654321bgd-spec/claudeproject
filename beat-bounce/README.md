@@ -14,6 +14,7 @@
 |---|---|---|---|
 | VILLIAN & madk1d — «ДИНАСТИЯ» (`beats.json`) | 59,29–87,14 с: два такта до дропа и 16 после | 113 | 27,85 с |
 | 9mice, Егор Крид, тёмный принц, madk1d — «Jealous» (`jealous.json`) | 3,84–22,02 с: отсчёт «three, two, one, jealous» и весь первый припев до обрыва | 113 | 18,17 с |
+| madk1d & VILLIAN — «8 миля» (`8mile.json`) | 49,99–78,79 с: два такта без баса и 16 тактов после его возвращения | 112 | 28,8 с |
 
 В «Jealous» отскок приходится на каждое слово отсчёта, перед припевом идёт дробь шестнадцатыми. Петля сходится сама: после обрыва «души ме…» снова начинается отсчёт.
 
@@ -47,6 +48,10 @@ node build.js --track династия.mp3                              # → be
 # «Jealous»: дроп задан вручную, чтобы взять первый припев с отсчётом
 python3 analyze.py jealous.mp3 --out jealous.json --drop 7.474 --before 2 --after 8
 node build.js --beats jealous.json --track jealous.mp3 --out beat-bounce-jealous.mp4 --seed 7 --bound 1600,2000
+
+# «8 миля»: трек ровно громкий, дропом служит возвращение баса после двух пустых тактов
+python3 analyze.py 8-миля.mp3 --out 8mile.json --drop 53.194 --before 2 --after 16
+node build.js --beats 8mile.json --track 8-миля.mp3 --out beat-bounce-8mile.mp4 --seed 7
 
 node build.js --preview 0,3.1,15                                # PNG-кадры в preview/, трек не нужен
 node build.js --track трек.mp3 --ad-title "Domino Team" --ad-sub "@dtlinkk_bot"

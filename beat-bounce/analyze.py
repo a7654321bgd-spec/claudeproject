@@ -80,7 +80,7 @@ def fit_grid(t, env, t_from, t_to):
     return p, (t_from + ph) % p
 
 
-def main(path, out='beats.json', drop_hint=None, bars_before=2, bars_after=16):
+def main(path, out='beats.json', drop_hint=None, bars_before=2, bars_after=16, finest=16):
     x = decode(path)
     dur = len(x) / SR
     t, env = flux_bands(x)
@@ -107,6 +107,19 @@ def main(path, out='beats.json', drop_hint=None, bars_before=2, bars_after=16):
         k_drop = k_rise
     drop = beat_t(k_drop)
     k0, k1 = k_drop - 4 * bars_before, k_drop + 4 * bars_after
+    # a slightly wrong tempo drifts by the time it reaches the clip: re-centre the grid on the clip's
+    # own onsets (period and phase), leaving well-fitted grids alone
+    offs = np.arange(-0.1, 0.1005, 0.0005)
+    shift = offs[np.argmax(sync_average(t, env['all'], [beat_t(k) for k in range(k_drop, k1)], offs))]
+    if abs(shift) > 0.01:
+        t_drop = beat_t(k_drop) + shift
+        best = max(((sync_average(t, env['all'], [t_drop + p * j for j in range(k1 - k_drop)], [0.0])[0], p)
+                    for p in np.linspace(period * 0.997, period * 1.003, 121)))
+        period, phase = best[1], t_drop % best[1]
+        k_drop = int(round((t_drop - phase) / period))
+        k0, k1 = k_drop - 4 * bars_before, k_drop + 4 * bars_after
+        print(f"grid re-centred on the clip by {1000 * shift:+.0f} ms")
+    drop = beat_t(k_drop)
     start, end = beat_t(k0), beat_t(k1)
 
     strength = lambda tt: peak(env['low'], tt)
@@ -143,7 +156,7 @@ def main(path, out='beats.json', drop_hint=None, bars_before=2, bars_after=16):
                 else:
                     s = np.clip(low, 0.35, 1.0) + (0.25 if k == 0 else 0)
                     add(tt, 'downbeat' if k == 0 else 'beat', min(1.0, s))
-            elif rel[k] >= bar_low:
+            elif rel[k] >= bar_low and (finest == 16 or k % 2 == 0):
                 if low >= 0.8:
                     add(tt, 'accent', np.clip(low, 0.6, 1.0))   # a heavy 808 off the beat
                 else:
@@ -182,5 +195,6 @@ if __name__ == '__main__':
     ap.add_argument('--drop', type=float, help='seconds into the track where the drop lands (found automatically if left out)')
     ap.add_argument('--before', type=int, default=2, help='bars of the clip before the drop')
     ap.add_argument('--after', type=int, default=16, help='bars of the clip from the drop on')
+    ap.add_argument('--finest', type=int, default=16, choices=(8, 16), help='shortest note that can be a hit: 8 for busy hi-hats')
     a = ap.parse_args()
-    main(a.track, a.out, a.drop, a.before, a.after)
+    main(a.track, a.out, a.drop, a.before, a.after, a.finest)

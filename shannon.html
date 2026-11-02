@@ -1,0 +1,508 @@
+<title>Игра Шеннона</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=PT+Serif:wght@400;700&family=PT+Sans:wght@400;700&family=PT+Mono&display=swap">
+<style>
+/* Layout: a teleprinter-tape game card leads; the bit counter sits beside it on desktop, history and notes follow. One column on phones. */
+:root {
+  --bg: #eef1f5;
+  --surface: #ffffff;
+  --ink: #152031;
+  --muted: #5a6779;
+  --line: #d3dae3;
+  --line-strong: #b4bfcc;
+  --accent: #1f56b8;
+  --on-accent: #ffffff;
+  --miss: #c2412d;
+  --h0: #ffffff;
+  --h1: #fde7c2;
+  --h2: #f8c47c;
+  --h3: #ee9a45;
+  --h4: #d2692a;
+  --h5: #a2421c;
+  --hot-ink: #ffffff;
+  --f-display: "PT Serif", Georgia, "Times New Roman", serif;
+  --f-body: "PT Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "PT Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e131a; --surface: #161d27; --ink: #e5eaf1; --muted: #93a0b2; --line: #263142; --line-strong: #3b4a5f;
+    --accent: #7aa5f0; --on-accent: #0e131a; --miss: #ff7a63;
+    --h0: #1f2733; --h1: #4a3a22; --h2: #7a5320; --h3: #b06d1d; --h4: #e08e2e; --h5: #ffbe6b; --hot-ink: #1a1206;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e131a; --surface: #161d27; --ink: #e5eaf1; --muted: #93a0b2; --line: #263142; --line-strong: #3b4a5f;
+  --accent: #7aa5f0; --on-accent: #0e131a; --miss: #ff7a63;
+  --h0: #1f2733; --h1: #4a3a22; --h2: #7a5320; --h3: #b06d1d; --h4: #e08e2e; --h5: #ffbe6b; --hot-ink: #1a1206;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--ink); font: 400 16px/1.55 var(--f-body); }
+[hidden] { display: none !important; }
+
+.wrap {
+  box-sizing: border-box; max-width: 1120px; margin: 0 auto;
+  padding-block: 28px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  grid-template-areas: "head head" "game stats" "history explain";
+  gap: 32px 44px; align-items: start;
+}
+.wrap > * { min-width: 0; }
+
+.head { grid-area: head; display: flex; flex-direction: column; gap: 10px; }
+.eyebrow { margin: 0; font: 400 12px/1.4 var(--f-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+h1 { margin: 0; font: 700 clamp(36px, 6vw, 58px)/1.02 var(--f-display); letter-spacing: -0.01em; text-wrap: balance; }
+h2 { margin: 0; font: 700 21px/1.25 var(--f-display); text-wrap: balance; }
+.lede { margin: 0; font-size: 18px; max-width: 62ch; }
+.dim { margin: 0; color: var(--muted); max-width: 62ch; }
+.small { font-size: 14px; }
+
+button { font: 700 15px var(--f-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 8px 16px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--muted); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+button.ghost { background: transparent; font-weight: 400; }
+
+/* game card */
+.game { grid-area: game; display: flex; flex-direction: column; gap: 14px; padding: 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; }
+.game-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.seg { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); }
+.seg button { border: 0; background: transparent; padding: 7px 14px; font-size: 14px; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
+
+.tape {
+  position: relative; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px 3px;
+  min-height: 112px; padding: 28px 12px 14px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line);
+}
+.tape::before {
+  content: ""; position: absolute; left: 12px; right: 12px; top: 10px; height: 7px;
+  background: radial-gradient(circle at 3.5px 3.5px, var(--line-strong) 2.2px, transparent 2.8px) 0 0 / 13px 7px repeat-x;
+}
+.cell {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  min-width: 1.15em; height: 1.75em; padding: 0 .08em; box-sizing: border-box;
+  font: 400 26px/1 var(--f-mono); color: var(--ink); border-radius: 5px;
+}
+.cell sub { position: absolute; right: 2px; bottom: 2px; font: 400 10px/1 var(--f-mono); }
+.cell.sp { color: var(--muted); }
+.h0 { background: var(--h0); }
+.h1 { background: var(--h1); }
+.h2 { background: var(--h2); }
+.h3 { background: var(--h3); }
+.h4 { background: var(--h4); }
+.h5 { background: var(--h5); }
+.cell.h4, .cell.h5 { color: var(--hot-ink); }
+.cell.caret { border-bottom: 3px solid var(--accent); border-radius: 0; animation: blink 1s steps(2) infinite; }
+.cell.new { animation: pop .25s ease-out; }
+@keyframes blink { 50% { border-bottom-color: transparent; } }
+@keyframes pop { from { transform: translateY(-6px); opacity: .2; } }
+
+.status { margin: 0; min-height: 1.55em; color: var(--muted); font-size: 15px; }
+.done {
+  display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--surface));
+}
+.done-phrase { margin: 0; font: 700 20px/1.3 var(--f-display); }
+.done-meta { margin: 0; color: var(--muted); }
+.done .primary { align-self: flex-start; }
+
+.kbd { display: flex; flex-direction: column; gap: 6px; user-select: none; -webkit-user-select: none; }
+.krow { display: flex; justify-content: center; gap: 5px; }
+.key {
+  flex: 0 0 calc((100% - 55px) / 12); max-width: 48px; min-width: 0; height: 46px; padding: 0;
+  border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  font: 400 19px var(--f-mono); touch-action: manipulation;
+}
+.key:hover:not(:disabled) { border-color: var(--accent); }
+.key:disabled { opacity: .3; cursor: default; }
+.key.wrong { text-decoration: line-through; }
+.key.space { flex: 0 1 300px; max-width: 300px; font: 400 15px var(--f-body); color: var(--muted); }
+.key.hit { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.key.miss { background: color-mix(in srgb, var(--miss) 18%, var(--surface)); border-color: var(--miss); animation: shake .3s; }
+@keyframes shake { 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+
+/* stats */
+.stats { grid-area: stats; display: flex; flex-direction: column; gap: 16px; }
+.big { display: flex; flex-direction: column; gap: 2px; }
+.big b { font: 700 clamp(40px, 7vw, 56px)/1.05 var(--f-display); font-variant-numeric: tabular-nums; }
+.big span { color: var(--muted); font-size: 15px; }
+.bars { display: flex; flex-direction: column; gap: 10px; }
+.bar-row { display: grid; grid-template-columns: minmax(0, 1fr) 4.5ch; gap: 3px 12px; align-items: center; }
+.b-label { grid-column: 1 / -1; font-size: 14px; color: var(--muted); }
+.track { height: 12px; border-radius: 6px; background: color-mix(in srgb, var(--line) 70%, var(--bg)); overflow: hidden; }
+.fill { height: 100%; width: 0; border-radius: 6px; transition: width .3s; }
+#bar-uniform .fill { background: var(--muted); }
+#bar-freq .fill { background: var(--h3); }
+#bar-you .fill { background: var(--accent); }
+.val { font: 400 14px var(--f-mono); text-align: right; font-variant-numeric: tabular-nums; }
+.hist { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; align-items: end; }
+.hcol { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.hbar-wrap { width: 100%; height: 84px; display: flex; align-items: flex-end; border-bottom: 1px solid var(--line-strong); }
+.hbar-wrap .bar { width: 100%; height: 0; border-radius: 4px 4px 0 0; box-shadow: inset 0 0 0 1px var(--line-strong); transition: height .3s; }
+.cnt, .hl { font: 400 12px/1.2 var(--f-mono); color: var(--muted); min-height: 1.2em; font-variant-numeric: tabular-nums; }
+.stats .ghost { align-self: flex-start; }
+
+/* history */
+.history { grid-area: history; display: flex; flex-direction: column; gap: 12px; }
+.history ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.history li { display: flex; flex-direction: column; gap: 4px; }
+.strip { display: flex; flex-wrap: wrap; gap: 2px; }
+.strip .cell { font-size: 15px; height: 1.6em; border-radius: 3px; }
+.h-meta { font-size: 13px; color: var(--muted); }
+
+/* notes */
+.explain { grid-area: explain; display: flex; flex-direction: column; gap: 22px; }
+.explain article { display: flex; flex-direction: column; gap: 6px; }
+.explain p { margin: 0; max-width: 62ch; }
+
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "game" "stats" "history" "explain"; gap: 28px; }
+}
+@media (max-width: 480px) {
+  .game { padding: 12px; }
+  .cell { font-size: 22px; }
+  .krow { gap: 4px; }
+  .key { flex-basis: calc((100% - 44px) / 12); height: 44px; font-size: 17px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .key.miss, .cell.new, .cell.caret { animation: none; }
+  .fill, .hbar-wrap .bar { transition: none; }
+}
+</style>
+
+<main class="wrap">
+  <header class="head">
+    <p class="eyebrow">Клод Шеннон · 1951</p>
+    <h1>Игра Шеннона</h1>
+    <p class="lede">Угадайте фразу по одной букве, считая и пробелы. Неверные буквы вычёркиваются с клавиатуры. По числу попыток видно, сколько информации несёт каждая буква: начало слова обычно дорогое, а конец почти бесплатный.</p>
+  </header>
+
+  <section class="game" aria-label="Игра">
+    <div class="game-top">
+      <div class="seg" id="modes" role="group" aria-label="Набор фраз">
+        <button type="button" id="mode-proverbs" data-mode="proverbs" aria-pressed="true">Пословицы</button>
+        <button type="button" id="mode-plain" data-mode="plain" aria-pressed="false">Обычные фразы</button>
+      </div>
+      <button type="button" class="ghost" id="skip">Другая фраза</button>
+    </div>
+    <div class="tape" id="tape" aria-label="Угаданная часть фразы"></div>
+    <p class="status" id="status" aria-live="polite"></p>
+    <div class="done" id="done" hidden aria-live="polite">
+      <p class="done-phrase" id="done-phrase"></p>
+      <p class="done-meta" id="done-meta"></p>
+      <button type="button" class="primary" id="next">Следующая фраза</button>
+    </div>
+    <div class="kbd" id="kbd"></div>
+    <p class="dim small">Цвет клетки показывает число попыток, шкала та же, что у столбиков в счёте. Можно печатать и с обычной клавиатуры, даже в английской раскладке.</p>
+  </section>
+
+  <aside class="stats" aria-labelledby="stats-h">
+    <h2 id="stats-h">Сколько бит в букве</h2>
+    <div class="big"><b id="big">—</b><span id="big-sub"></span></div>
+    <div class="bars">
+      <div class="bar-row" id="bar-uniform"><span class="b-label">Наугад из 33 символов</span><div class="track"><div class="fill"></div></div><span class="val"></span></div>
+      <div class="bar-row" id="bar-freq"><span class="b-label">Частотный угадыватель: пробует символы от частых к редким, без контекста</span><div class="track"><div class="fill"></div></div><span class="val"></span></div>
+      <div class="bar-row" id="bar-you"><span class="b-label">Вы</span><div class="track"><div class="fill"></div></div><span class="val"></span></div>
+    </div>
+    <p class="dim small" id="avg"></p>
+    <div class="hist" id="hist" role="img" aria-label="Сколько символов угадано с какой попытки"></div>
+    <p class="dim small">Столбики: сколько символов вы угадали с 1-й, 2-й, 3-й попытки и дальше.</p>
+    <button type="button" class="ghost" id="reset">Сбросить статистику</button>
+  </aside>
+
+  <section class="history" aria-labelledby="history-h">
+    <h2 id="history-h">Угаданные фразы</h2>
+    <ol id="history-list"></ol>
+  </section>
+
+  <section class="explain" aria-label="Пояснения">
+    <article>
+      <h2>Откуда игра</h2>
+      <p>В 1951 году Клод Шеннон, создатель теории информации, предлагал людям угадывать английский текст по одной букве и записывал число попыток. Наугад на символ нужно log₂ 27 ≈ 4,75 бита: 26 букв и пробел. Людям с контекстом хватало примерно от 0,6 до 1,3 бита.</p>
+    </article>
+    <article>
+      <h2>Как попытки превращаются в биты</h2>
+      <p>Представьте двойника, который угадывает точно так же, как вы. Тогда вместо фразы ему достаточно передать номера попыток: 1, 1, 3, 1, 1… Единиц среди них большинство, поэтому номера сжимаются гораздо сильнее самого текста. Энтропия этих номеров даёт оценку сверху: сколько информации на самом деле несёт символ. На коротких фразах оценка грубая, с каждой новой фразой она точнее.</p>
+    </article>
+    <article>
+      <h2>При чём тут я</h2>
+      <p>Я играю в эту игру постоянно. Языковая модель читает текст и для каждого следующего кусочка выдаёт вероятности вариантов. Чем точнее предсказание, тем меньше бит нужно, чтобы записать текст, поэтому хороший предсказатель — это хороший архиватор. Качество языковых моделей так и измеряют: в битах на символ или в перплексии.</p>
+    </article>
+    <article>
+      <h2>Деталь про азбуку Морзе</h2>
+      <p>Самая частая буква русского языка, О, в азбуке Морзе передаётся тремя тире: − − −. Это в разы дольше, чем Е, которой досталась одна точка. Коды русских букв взяли у похожих латинских, а не подбирали под частоты русского текста. Частотный угадыватель на этой странице пробует О сразу после пробела.</p>
+    </article>
+  </section>
+</main>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const plural = (n, f) => { const a = Math.abs(n) % 100, b = a % 10; return a > 10 && a < 20 ? f[2] : b > 1 && b < 5 ? f[1] : b === 1 ? f[0] : f[2]; };
+  const fmt2 = v => v.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmt1 = v => v.toLocaleString('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+  const SYMBOLS = 33;                                  // 32 letters (ё counts as е) + space
+  const FREQ_ORDER = ' оеаинтсрвлкмдпуяыьгзбчйхжшюцщэфъ';  // Russian letter frequency, most common first
+  const rank = ch => FREQ_ORDER.indexOf(ch) + 1;
+  const norm = s => s.toLowerCase().replace(/ё/g, 'е').replace(/[^а-я ]/g, ' ').replace(/\s+/g, ' ').trim();
+  const level = a => a <= 1 ? 0 : a === 2 ? 1 : a === 3 ? 2 : a <= 5 ? 3 : a <= 10 ? 4 : 5;
+  const LEVEL_LABELS = ['1', '2', '3', '4–5', '6–10', '11+'];
+
+  // Shannon's upper bound: entropy of the distribution of guess numbers.
+  function bits(tries) {
+    if (!tries.length) return null;
+    const c = new Map();
+    tries.forEach(a => c.set(a, (c.get(a) || 0) + 1));
+    let h = 0;
+    for (const n of c.values()) { const q = n / tries.length; h -= q * Math.log2(q); }
+    return h;
+  }
+  const avg = a => a.reduce((s, x) => s + x, 0) / a.length;
+
+  const SETS = {
+    proverbs: [
+      'Тише едешь — дальше будешь.', 'Без труда не выловишь и рыбку из пруда.', 'Семь раз отмерь, один раз отрежь.',
+      'Не имей сто рублей, а имей сто друзей.', 'Делу время, потехе час.', 'Волков бояться — в лес не ходить.',
+      'Под лежачий камень вода не течёт.', 'Любишь кататься — люби и саночки возить.', 'Что посеешь, то и пожнёшь.',
+      'Яблоко от яблони недалеко падает.', 'Утро вечера мудренее.', 'В гостях хорошо, а дома лучше.',
+      'Старый друг лучше новых двух.', 'Не всё коту масленица.',
+    ],
+    plain: [
+      'Мы договорились встретиться у метро в семь вечера.', 'Кошка спит на подоконнике и греется на солнце.',
+      'Сегодня на улице холодно, поэтому я надел шапку.', 'После работы я зайду в магазин за хлебом.',
+      'Поезд опаздывает на двадцать минут.', 'Вчера мы смотрели фильм про космос.',
+      'Не забудь выключить свет, когда будешь уходить.', 'У моей бабушки в деревне живут куры и коза.',
+      'Завтра обещают дождь, так что возьми зонт.', 'Он долго искал ключи, а они лежали в кармане.',
+    ],
+  };
+
+  // ---------- state ----------
+  const KEY = 'shannon-game-v1';
+  let mode = 'proverbs';
+  let totals = { human: [], machine: [] };
+  let history = [];
+  const queues = { proverbs: [], plain: [] };
+  let cur = null, justRevealed = false;
+
+  function load() {
+    try {
+      const d = JSON.parse(localStorage.getItem(KEY) || 'null');
+      if (d && d.totals && Array.isArray(d.totals.human) && Array.isArray(d.totals.machine)) {
+        totals = d.totals;
+        history = Array.isArray(d.history) ? d.history : [];
+        if (SETS[d.mode]) mode = d.mode;
+      }
+    } catch (e) {}
+  }
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify({ totals, history, mode })); } catch (e) {}
+  }
+  function shuffle(a) {
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    return a;
+  }
+  function nextPhrase() {
+    const q = queues[mode];
+    if (!q.length) {
+      q.push(...shuffle(SETS[mode].slice()));
+      if (cur && q[0] === cur.original) q.push(q.shift());
+    }
+    const original = q.shift();
+    cur = { original, text: norm(original), pos: 0, tries: [], wrong: new Set(), attempts: 0, done: false };
+    justRevealed = false;
+    render();
+  }
+
+  function guess(ch) {
+    if (!cur || cur.done || cur.wrong.has(ch)) return;
+    cur.attempts++;
+    const target = cur.text[cur.pos];
+    if (ch === target) {
+      cur.tries.push(cur.attempts);
+      totals.human.push(cur.attempts);
+      totals.machine.push(rank(target));
+      cur.pos++; cur.attempts = 0; cur.wrong.clear();
+      justRevealed = true;
+      flashKey(ch, 'hit');
+      if (cur.pos >= cur.text.length) {
+        cur.done = true;
+        history.unshift({ original: cur.original, text: cur.text, tries: cur.tries.slice() });
+        history = history.slice(0, 40);
+      }
+      save();
+      render();
+      if (cur.done) $('next').focus();
+    } else {
+      cur.wrong.add(ch);
+      flashKey(ch, 'miss');
+      renderStatus(); renderKeys();
+    }
+  }
+
+  // ---------- keyboard ----------
+  const ROWS = ['йцукенгшщзхъ', 'фывапролджэ', 'ячсмитьбю'];
+  $('kbd').innerHTML = ROWS.map(r => `<div class="krow">${[...r].map(ch =>
+    `<button type="button" class="key" id="key-${ch}" data-ch="${ch}">${ch}</button>`).join('')}</div>`).join('')
+    + '<div class="krow"><button type="button" class="key space" id="key-space" data-ch=" ">пробел</button></div>';
+  const keyFor = ch => $(ch === ' ' ? 'key-space' : 'key-' + ch);
+  $('kbd').addEventListener('mousedown', e => { if (e.target.closest('.key')) e.preventDefault(); });
+  $('kbd').addEventListener('click', e => { const k = e.target.closest('.key'); if (k) guess(k.dataset.ch); });
+
+  function flashKey(ch, cls) {
+    const k = keyFor(ch); if (!k) return;
+    k.classList.remove('hit', 'miss'); void k.offsetWidth; k.classList.add(cls);
+    setTimeout(() => k.classList.remove(cls), 400);
+  }
+
+  // Physical keys map to ЙЦУКЕН positions, so a Latin layout works too.
+  const CODE = {
+    KeyQ: 'й', KeyW: 'ц', KeyE: 'у', KeyR: 'к', KeyT: 'е', KeyY: 'н', KeyU: 'г', KeyI: 'ш', KeyO: 'щ', KeyP: 'з', BracketLeft: 'х', BracketRight: 'ъ',
+    KeyA: 'ф', KeyS: 'ы', KeyD: 'в', KeyF: 'а', KeyG: 'п', KeyH: 'р', KeyJ: 'о', KeyK: 'л', KeyL: 'д', Semicolon: 'ж', Quote: 'э',
+    KeyZ: 'я', KeyX: 'ч', KeyC: 'с', KeyV: 'м', KeyB: 'и', KeyN: 'т', KeyM: 'ь', Comma: 'б', Period: 'ю', Backquote: 'е', Space: ' ',
+  };
+  addEventListener('keydown', e => {
+    if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+    const onButton = e.target instanceof Element && e.target.closest('button');
+    if ((e.key === 'Enter' || e.key === ' ') && onButton) return;
+    if (cur.done) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); nextPhrase(); }
+      return;
+    }
+    const k = (e.key || '').toLowerCase();
+    let ch = null;
+    if (/^[а-яё]$/.test(k)) ch = k === 'ё' ? 'е' : k;
+    else if (CODE[e.code] !== undefined) ch = CODE[e.code];
+    if (ch === null) return;
+    e.preventDefault();
+    guess(ch);
+  });
+
+  // ---------- rendering ----------
+  function cellsHTML(text, tries, upto, withCounts) {
+    let h = '';
+    for (let i = 0; i < upto; i++) {
+      const ch = text[i], a = tries[i];
+      const cls = `cell h${level(a)}${ch === ' ' ? ' sp' : ''}${withCounts && justRevealed && i === upto - 1 ? ' new' : ''}`;
+      h += `<span class="${cls}" title="${a} ${plural(a, ['попытка', 'попытки', 'попыток'])}">${ch === ' ' ? '·' : ch}${withCounts && a > 1 ? `<sub>${a}</sub>` : ''}</span>`;
+    }
+    return h;
+  }
+
+  function renderTape() {
+    $('tape').innerHTML = cellsHTML(cur.text, cur.tries, cur.pos, true) + (cur.done ? '' : '<span class="cell caret" aria-hidden="true"></span>');
+    justRevealed = false;
+  }
+
+  function renderStatus() {
+    const s = $('status');
+    s.hidden = cur.done;
+    if (cur.done) { s.textContent = ''; return; }
+    let t = `Символ ${cur.pos + 1}, попытка ${cur.attempts + 1}.`;
+    if (cur.wrong.size) t += ` Мимо: ${[...cur.wrong].map(c => c === ' ' ? 'пробел' : c).join(', ')}.`;
+    else if (cur.pos === 0) t += ' Какая буква первая?';
+    s.textContent = t;
+  }
+
+  function renderKeys() {
+    document.querySelectorAll('.key').forEach(k => {
+      const wrong = cur.wrong.has(k.dataset.ch);
+      k.disabled = cur.done || wrong;
+      k.classList.toggle('wrong', wrong);
+    });
+  }
+
+  function renderDone() {
+    $('done').hidden = !cur.done;
+    if (!cur.done) return;
+    const n = cur.tries.length, sum = cur.tries.reduce((s, x) => s + x, 0);
+    const mach = [...cur.text].reduce((s, ch) => s + rank(ch), 0);
+    $('done-phrase').textContent = cur.original;
+    $('done-meta').textContent = `${n} ${plural(n, ['символ', 'символа', 'символов'])} за ${sum} ${plural(sum, ['попытку', 'попытки', 'попыток'])}, около ${fmt2(bits(cur.tries))} бита на символ. Частотный угадыватель потратил бы на эту фразу ${mach} ${plural(mach, ['попытку', 'попытки', 'попыток'])}.`;
+  }
+
+  function setBar(id, v) {
+    const el = $(id);
+    el.querySelector('.fill').style.width = v == null ? '0%' : Math.min(100, v / Math.log2(SYMBOLS) * 100) + '%';
+    el.querySelector('.val').textContent = v == null ? '—' : fmt2(v);
+  }
+
+  $('hist').innerHTML = LEVEL_LABELS.map((l, i) =>
+    `<div class="hcol" id="hb-${i}"><span class="cnt"></span><div class="hbar-wrap"><div class="bar h${i}"></div></div><span class="hl">${l}</span></div>`).join('');
+
+  function renderStats() {
+    const H = totals.human, M = totals.machine, n = H.length;
+    const hb = bits(H), mb = bits(M);
+    $('big').textContent = n ? `≈ ${fmt2(hb)}` : '—';
+    $('big-sub').textContent = n
+      ? `бита на символ у вас, по ${n} ${plural(n, ['символу', 'символам', 'символам'])}${n < 40 ? '. Пока мало данных, оценка будет скакать.' : '.'}`
+      : 'Угадайте несколько букв, и здесь появится ваша оценка.';
+    setBar('bar-uniform', Math.log2(SYMBOLS));
+    setBar('bar-freq', mb);
+    setBar('bar-you', hb);
+    $('avg').textContent = n ? `В среднем попыток на символ: у вас ${fmt1(avg(H))}, у частотного угадывателя ${fmt1(avg(M))}.` : '';
+    const buckets = [0, 0, 0, 0, 0, 0];
+    H.forEach(a => buckets[level(a)]++);
+    const max = Math.max(1, ...buckets);
+    buckets.forEach((c, i) => {
+      const col = $('hb-' + i);
+      col.querySelector('.bar').style.height = (c / max * 100) + '%';
+      col.querySelector('.cnt').textContent = c || '';
+    });
+    $('hist').setAttribute('aria-label', 'Сколько символов угадано с какой попытки: ' + buckets.map((c, i) => `${LEVEL_LABELS[i]}: ${c}`).join(', '));
+  }
+
+  function renderHistory() {
+    const el = $('history-list');
+    if (!history.length) {
+      el.innerHTML = '<li class="dim">Здесь появятся угаданные фразы, раскрашенные по числу попыток. Обычно видно, что дороже всего начала слов.</li>';
+      return;
+    }
+    el.innerHTML = history.map(h => {
+      const sum = h.tries.reduce((s, x) => s + x, 0);
+      return `<li><div class="strip">${cellsHTML(h.text, h.tries, h.text.length, false)}</div><span class="h-meta">${fmt2(bits(h.tries))} бита на символ · ${sum} ${plural(sum, ['попытка', 'попытки', 'попыток'])} на ${h.tries.length} ${plural(h.tries.length, ['символ', 'символа', 'символов'])}</span></li>`;
+    }).join('');
+  }
+
+  function renderModes() {
+    document.querySelectorAll('#modes button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
+  }
+
+  function render() {
+    renderModes(); renderTape(); renderStatus(); renderKeys(); renderDone(); renderStats(); renderHistory();
+  }
+
+  // ---------- controls ----------
+  $('modes').addEventListener('click', e => {
+    const b = e.target.closest('button[data-mode]');
+    if (!b || b.dataset.mode === mode) return;
+    mode = b.dataset.mode; save(); nextPhrase();
+  });
+  $('skip').addEventListener('click', nextPhrase);
+  $('next').addEventListener('click', nextPhrase);
+
+  let resetTimer = 0;
+  $('reset').addEventListener('click', () => {
+    const btn = $('reset');
+    if (!resetTimer) {
+      btn.textContent = 'Нажмите ещё раз, чтобы сбросить';
+      resetTimer = setTimeout(() => { resetTimer = 0; btn.textContent = 'Сбросить статистику'; }, 3000);
+      return;
+    }
+    clearTimeout(resetTimer); resetTimer = 0;
+    btn.textContent = 'Сбросить статистику';
+    totals = { human: [], machine: [] }; history = [];
+    save(); render();
+  });
+
+  load();
+  nextPhrase();
+})();
+</script>

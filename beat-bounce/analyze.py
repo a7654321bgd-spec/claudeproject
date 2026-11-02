@@ -105,54 +105,60 @@ def main(path):
     start, end = beat_t(k0), beat_t(k1)
 
     strength = lambda tt: peak(env['low'], tt)
-    # offbeat eighths that carry a heavy low hit in every repeat of the four-bar loop
-    loop = 32
-    slot_low = np.zeros(loop)
-    for rep in range(BARS_AFTER // 4):
-        for s in range(loop):
-            slot_low[s] += strength(drop + (rep * loop + s) * period / 2)
-    slot_low /= BARS_AFTER // 4
-    beat_low = np.median(slot_low[0::2])
-    accents = [s for s in range(1, loop, 2) if slot_low[s] > 2.5 * beat_low]
-
-    ref = np.percentile([strength(beat_t(k)) for k in range(k_drop, k1)], 90)
+    ref_low = np.percentile([strength(beat_t(k)) for k in range(k_drop, k1)], 90)
     events = []
 
-    def add(tt, kind, s=None):
-        if s is None:
-            s = float(np.clip(strength(tt) / ref, 0.35, 1.0))
-        events.append({'t': round(tt - start, 5), 's': round(s, 3), 'kind': kind})
+    def add(tt, kind, s):
+        events.append({'t': round(tt - start, 5), 's': round(float(s), 3), 'kind': kind})
 
+    # Every beat is a hit; between beats, an eighth or sixteenth is a hit when the drums really
+    # sound there (measured against the beats of the same bar). The bar is stricter in the first half
+    # of the drop than in the second, so the square gets busier as the track goes on.
     add(start, 'start', 1.0)                             # the pre-drop phrase opens with a hit, then a glide
-    for k in range(k0 + 4, k_drop):                      # the build: every beat
-        add(beat_t(k), 'beat')
-    for k in range(k_drop, k1):
-        j = k - k_drop
-        if k == k_drop:
-            add(beat_t(k), 'drop', 2.0)
-        else:
-            add(beat_t(k), 'downbeat' if j % 4 == 0 else 'beat')
-            if j % 4 == 0:
-                events[-1]['s'] = round(min(1.0, events[-1]['s'] + 0.25), 3)
-        for s in accents:                                # eighth after this beat
-            if (j * 2 + 1) % loop == s:
-                add(beat_t(k) + period / 2, 'accent')
+    sixteenth = period / 4
+    for bar in range(-1, BARS_AFTER):                    # bar -1 is the build just before the drop
+        b0 = drop + bar * 4 * period
+        rel = [peak(env['all'], b0 + k * sixteenth) for k in range(16)]
+        ref = np.median(rel[0::4])
+        rel = [v / ref for v in rel]
+        bar_low = 0.85 if bar < BARS_AFTER // 2 else 0.7
+        for k in range(16):
+            tt, low = b0 + k * sixteenth, strength(b0 + k * sixteenth) / ref_low
+            if k % 4 == 0:
+                if bar == 0 and k == 0:
+                    add(tt, 'drop', 2.0)
+                elif k == 0 and bar > 0 and rel[k] > 2.5:
+                    add(tt, 'impact', 1.6)               # a second crash as big as the drop's
+                else:
+                    s = np.clip(low, 0.35, 1.0) + (0.25 if k == 0 else 0)
+                    add(tt, 'downbeat' if k == 0 else 'beat', min(1.0, s))
+            elif rel[k] >= bar_low:
+                if low >= 0.8:
+                    add(tt, 'accent', np.clip(low, 0.6, 1.0))   # a heavy 808 off the beat
+                else:
+                    add(tt, 'eighth' if k % 2 == 0 else 'sixteenth', np.clip(0.2 + 0.3 * rel[k], 0.3, 0.7))
 
-    # loudness envelope at 60 fps for the picture to breathe with
+    # loudness and bass envelopes at 60 fps for the picture to breathe with
     seg = x[int(start * SR): int(end * SR)]
+    spec = np.fft.rfft(seg)
+    spec[np.fft.rfftfreq(len(seg), 1 / SR) > 150] = 0
+    bass = np.fft.irfft(spec, len(seg))
     fh = SR // 60
-    env60 = np.array([np.sqrt(np.mean(seg[i:i + fh] ** 2)) for i in range(0, len(seg) - fh + 1, fh)])
-    env60 = np.clip(env60 / np.percentile(env60, 95), 0, 1)
+    frames60 = lambda sig: np.array([np.sqrt(np.mean(sig[i:i + fh] ** 2)) for i in range(0, len(sig) - fh + 1, fh)])
+    norm = lambda a: np.clip(a / np.percentile(a, 95), 0, 1)
+    env60, bass60 = norm(frames60(seg)), norm(frames60(bass))
 
     data = {
         'bpm': round(60 / period, 3), 'period': period, 'drop': drop, 'start': start, 'end': end,
-        'duration': end - start, 'events': events, 'envelope': [round(float(v), 3) for v in env60],
+        'duration': end - start, 'events': events,
+        'envelope': [round(float(v), 3) for v in env60], 'bass': [round(float(v), 3) for v in bass60],
     }
     with open(OUT, 'w') as fh_:
         json.dump(data, fh_)
     print(f"tempo {60 / period:.2f} BPM, beat {period * 1000:.2f} ms, grid phase {phase:.4f}s")
     print(f"drop at {drop:.3f}s; clip {start:.3f}–{end:.3f}s ({end - start:.2f}s)")
-    print(f"{len(events)} hits: {sum(e['kind'] == 'accent' for e in events)} offbeat accents in slots {accents}")
+    kinds = {k: sum(e['kind'] == k for e in events) for k in ('beat', 'downbeat', 'eighth', 'sixteenth', 'accent', 'impact')}
+    print(f"{len(events)} hits: {kinds}")
     offs = np.arange(-0.05, 0.0505, 0.001)
     beats = [beat_t(k) for k in range(k_drop, k1)]
     print(f"check: onsets average to a peak {1000 * offs[np.argmax(sync_average(t, env['all'], beats, offs))]:+.0f} ms from the grid")

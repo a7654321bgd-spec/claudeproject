@@ -4,8 +4,9 @@
 // wall it is not meant to touch.
 'use strict';
 
-// bound: the path stays inside ±bound.x, ±bound.y, so the lit walls build up into one picture
-const DEFAULTS = { speed: 780, half: 26, wallLen: 150, wallThick: 16, margin: 16, seed: 11, inward: 0.75, bound: { x: 1150, y: 1450 } };
+// bound: the path stays inside ±bound.x, ±bound.y, so the lit walls build up into one picture.
+// A wall is as long as the room around its hit allows: quick runs of sixteenths get short walls.
+const DEFAULTS = { speed: 900, half: 26, wallLen: [60, 150], wallThick: 16, margin: 12, seed: 11, inward: 0.75, bound: { x: 1300, y: 1650 } };
 
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -33,17 +34,17 @@ function segHitsBox(ax, ay, bx, by, box) {
   return lo <= hi;
 }
 
-// The wall the square meets at (x, y) while moving along (dx, dy), on the given axis.
-function makeWall(x, y, dx, dy, axis, P) {
+// The wall (of the given length) the square meets at (x, y) while moving along (dx, dy), on the given axis.
+function makeWall(x, y, dx, dy, axis, len, P) {
   const off = P.half + P.wallThick / 2;
   if (axis === 'x') {
     const cx = x + dx * off;
-    return { cx, cy: y, w: P.wallThick, h: P.wallLen, nx: -dx, ny: 0,
-      box: { x0: cx - P.wallThick / 2, x1: cx + P.wallThick / 2, y0: y - P.wallLen / 2, y1: y + P.wallLen / 2 } };
+    return { cx, cy: y, w: P.wallThick, h: len, nx: -dx, ny: 0,
+      box: { x0: cx - P.wallThick / 2, x1: cx + P.wallThick / 2, y0: y - len / 2, y1: y + len / 2 } };
   }
   const cy = y + dy * off;
-  return { cx: x, cy, w: P.wallLen, h: P.wallThick, nx: 0, ny: -dy,
-    box: { x0: x - P.wallLen / 2, x1: x + P.wallLen / 2, y0: cy - P.wallThick / 2, y1: cy + P.wallThick / 2 } };
+  return { cx: x, cy, w: len, h: P.wallThick, nx: 0, ny: -dy,
+    box: { x0: x - len / 2, x1: x + len / 2, y0: cy - P.wallThick / 2, y1: cy + P.wallThick / 2 } };
 }
 
 function plan(events, duration, opts = {}) {
@@ -54,16 +55,21 @@ function plan(events, duration, opts = {}) {
   const coin = events.map(() => rng());
   const walls = [], segs = [];
   const clear = P.half + P.margin;
-  let visited = 0;
+  const lens = events.map((e, k) => {
+    const gap = Math.min(k ? e.t - events[k - 1].t : Infinity, k + 1 < n ? events[k + 1].t - e.t : Infinity);
+    return Math.max(P.wallLen[0], Math.min(P.wallLen[1], P.speed * gap * 0.75));
+  });
+  let visited = 0, deepest = 0;
 
   function dfs(k, x, y, dx, dy) {
     if (k === n) return true;
-    if (++visited > 2e6) throw new Error('path search gave up');
+    deepest = Math.max(deepest, k);
+    if (++visited > 2e6) throw new Error(`path search gave up at hit ${deepest}`);
     // usually bounce back towards the middle, sometimes not, so the path wanders but stays compact
     const towards = a => (a === 'x' ? -dx * -x : 0) + (a === 'y' ? -dy * -y : 0);
     const prefer = towards('x') >= towards('y') ? ['x', 'y'] : ['y', 'x'];
     for (const axis of coin[k] < P.inward ? prefer : prefer.slice().reverse()) {
-      const wall = makeWall(x, y, dx, dy, axis, P);
+      const wall = makeWall(x, y, dx, dy, axis, lens[k], P);
       const roomy = grow(wall.box, P.margin);
       if (walls.some(w => overlap(roomy, w.box))) continue;
       // the new wall must not stand across any stretch already flown (the one arriving here touches it)
@@ -82,7 +88,7 @@ function plan(events, duration, opts = {}) {
     }
     return false;
   }
-  if (!dfs(0, 0, 0, 1, 1)) throw new Error('no path fits these hits');
+  if (!dfs(0, 0, 0, 1, 1)) throw new Error(`no path fits these hits (got as far as hit ${deepest} of ${n})`);
   return { u, half: P.half, walls: walls.map(({ box, ...w }) => w), segs, visited };
 }
 

@@ -9,13 +9,16 @@
 <canvas id="cv" width="1080" height="1920"></canvas>
 <script>
 'use strict';
-// Draws the square that hits a wall on every beat, from the plan build.js makes (bounce.js over
-// beats.json). Before the drop everything is monochrome; the drop turns the colour on, and in the
-// last bar the camera pulls back to show every lit wall at once.
+// Draws the square that hits a wall on every hit of the track, from the plan build.js makes
+// (bounce.js over beats.json), cut like a phonk edit: zoom punches and camera roll on the beats,
+// RGB split and slice glitches on the heavy hits, a negative flash on the two crashes, and the
+// scene pulsing with the bass. Monochrome until the drop; the last bar pulls back to show every lit wall.
 const W = 1080, H = 1920, FPS = 60, TAU = Math.PI * 2;
 const FONT = '"Inter Display", "Inter", sans-serif';
 const ANCHOR = [540, 1010];             // where the camera keeps the square on screen
 const REVEAL = 1.7;                     // seconds of pull-back at the end
+const BIG = new Set(['drop', 'impact']);                                    // the two crashes
+const BEATLIKE = new Set(['start', 'beat', 'downbeat', 'accent', 'drop', 'impact']);
 
 const clamp01 = x => x < 0 ? 0 : x > 1 ? 1 : x;
 const smooth = (a, b, x) => { const k = clamp01((x - a) / (b - a)); return k * k * (3 - 2 * k); };
@@ -36,23 +39,24 @@ function lastAtOrBefore(arr, t, key) {
   while (lo <= hi) { const m = (lo + hi) >> 1; if (key(arr[m]) <= t) { ans = m; lo = m + 1; } else hi = m - 1; }
   return ans;
 }
+function layer() { const c = document.createElement('canvas'); c.width = W; c.height = H; return c; }
 
 const cv = document.getElementById('cv');
 const ctx = cv.getContext('2d');
-const grain = document.createElement('canvas');
-grain.width = W; grain.height = H;
+const FX = { src: layer(), r: layer(), g: layer(), b: layer() };
+const grain = layer();
 {
   const g = grain.getContext('2d'), id = g.createImageData(W, H), rng = mulberry32(9);
   for (let i = 0; i < id.data.length; i += 4) { const v = rng() * 255; id.data[i] = id.data[i + 1] = id.data[i + 2] = v; id.data[i + 3] = 10; }
   g.putImageData(id, 0, 0);
 }
 
-let B, PLAN, AD, DUR, T_DROP, WALLS, SEGS, CAM, MAP, SPARKS, HALF;
+let B, PLAN, AD, DUR, T_DROP, WALLS, SEGS, CAM, MAP, SPARKS, HALF, DUST, DROP_INDEX = 0;
 
 // colour of the square after hit j: grey before the drop, then round the rainbow, one step per hit
-function hueAt(j) { return (330 + 24 * Math.max(0, j - DROP_INDEX)) % 360; }
-let DROP_INDEX = 0;
-function colorOf(j, l = 62, a = 1) { return j < DROP_INDEX ? `hsla(255,20%,${Math.min(96, l + 22)}%,${a})` : hsla(hueAt(j), 95, l, a); }
+const hueAt = j => (330 + 24 * Math.max(0, j - DROP_INDEX)) % 360;
+const colorOf = (j, l = 62, a = 1) => (j < DROP_INDEX ? `hsla(255,20%,${Math.min(96, l + 22)}%,${a})` : hsla(hueAt(j), 95, l, a));
+const at60 = (arr, t) => arr[Math.max(0, Math.min(arr.length - 1, Math.round(t * FPS)))] || 0;
 
 function pos(t) {
   const i = Math.max(0, lastAtOrBefore(SEGS, t, s => s.t0));
@@ -72,10 +76,10 @@ function setup(data) {
   CAM = [];
   let [cx, cy] = pos(0.15), vx = 0, vy = 0;
   const w0 = 8, sub = 4, dt = 1 / FPS / sub;
-  for (let f = 0; f <= Math.ceil(DUR * FPS); f++) {
+  for (let f = 0; f <= Math.ceil(DUR * FPS) + 1; f++) {
     for (let k = 0; k < sub; k++) {
       const t = (f * sub + k) * dt;
-      const [ax, ay] = pos(t), [bx, by] = pos(Math.min(DUR, t + 0.32));
+      const [ax, ay] = pos(t), [bx, by] = pos(Math.min(DUR, t + 0.3));
       const tx = 0.55 * ax + 0.45 * bx, ty = 0.55 * ay + 0.45 * by;
       vx += (w0 * w0 * (tx - cx) - 2 * w0 * vx) * dt; vy += (w0 * w0 * (ty - cy) - 2 * w0 * vy) * dt;
       cx += vx * dt; cy += vy * dt;
@@ -85,59 +89,86 @@ function setup(data) {
   // the whole picture for the pull-back at the end
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const w of WALLS) { x0 = Math.min(x0, w.cx - w.w / 2); x1 = Math.max(x1, w.cx + w.w / 2); y0 = Math.min(y0, w.cy - w.h / 2); y1 = Math.max(y1, w.cy + w.h / 2); }
-  const zoom = Math.min(980 / (x1 - x0), 1040 / (y1 - y0));   // fits between the title and TikTok's caption
-  MAP = { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, zoom };
+  MAP = { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, zoom: Math.min(980 / (x1 - x0), 1040 / (y1 - y0)) };
 
-  // sparks for every hit, fixed in advance so any frame can be drawn on its own
+  // sparks for every hit and dust in the air, fixed in advance so any frame can be drawn on its own
   const rng = mulberry32(42);
-  SPARKS = WALLS.map((w, j) => {
-    const n = w.kind === 'drop' ? 70 : Math.round(8 + 18 * Math.min(1, w.s));
+  SPARKS = WALLS.map(w => {
+    const big = BIG.has(w.kind), n = big ? 70 : Math.round(6 + 18 * Math.min(1, w.s));
     const px = w.cx - w.nx * (w.w / 2), py = w.cy - w.ny * (w.h / 2);   // the face the square touched
     const base = Math.atan2(w.ny, w.nx);
     return Array.from({ length: n }, () => {
-      const a = base + (rng() * 2 - 1) * 1.25, sp = (180 + 560 * rng()) * (w.kind === 'drop' ? 1.8 : 0.6 + 0.4 * Math.min(1, w.s));
+      const a = base + (rng() * 2 - 1) * 1.25, sp = (180 + 560 * rng()) * (big ? 1.8 : 0.6 + 0.4 * Math.min(1, w.s));
       return { x: px, y: py, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.28 + 0.3 * rng(), size: 2 + 3 * rng() };
     });
   });
+  DUST = Array.from({ length: 220 }, () => ({
+    x: x0 - 500 + rng() * (x1 - x0 + 1000), y: y0 - 700 + rng() * (y1 - y0 + 1400), r: 1.2 + 2.6 * rng(), hue: rng() * 360,
+  }));
   return { FPS, DURATION: DUR, hits: WALLS.length, map: MAP };
 }
 
-// ---------- drawing ----------
+// ---------- camera ----------
 function view(t) {
   const fi = Math.max(0, Math.min(CAM.length - 1.001, t * FPS)), f = Math.floor(fi), q = fi - f;
-  let cx = CAM[f][0] + (CAM[f + 1][0] - CAM[f][0]) * q, cy = CAM[f][1] + (CAM[f + 1][1] - CAM[f][1]) * q, z = 0.95;
-  const dk = t - T_DROP;
-  if (dk >= 0) z += 0.12 * Math.exp(-dk / 0.22);
-  const r = smooth(DUR - REVEAL, DUR - 0.25, t);
-  cx += (MAP.cx - cx) * r; cy += (MAP.cy - cy) * r; z += (MAP.zoom - z) * r;
-  // shake along the direction of recent hits
-  let sx = 0, sy = 0;
-  for (let j = hitIndex(t); j >= 0 && t - WALLS[j].t < 0.3; j--) {
-    const w = WALLS[j], tau = t - w.t, amp = (w.kind === 'drop' ? 26 : 3 + 9 * Math.min(1, w.s)) * Math.exp(-tau / 0.07);
-    const wob = Math.cos(tau * 75);
+  let cx = CAM[f][0] + (CAM[f + 1][0] - CAM[f][0]) * q, cy = CAM[f][1] + (CAM[f + 1][1] - CAM[f][1]) * q;
+  let z = 0.95, roll = 0, sx = 0, sy = 0;
+  if (t < T_DROP) {
+    // the build: a slow push in and a shiver that grows until the drop
+    z += 0.1 * smooth(0, T_DROP, t);
+    const k = 4 * smooth(T_DROP - 1.6, T_DROP, t);
+    sx += Math.sin(t * 97) * k; sy += Math.cos(t * 83) * k;
+  }
+  for (let j = hitIndex(t); j >= 0 && t - WALLS[j].t < 0.45; j--) {
+    const w = WALLS[j], tau = t - w.t, big = BIG.has(w.kind), beat = BEATLIKE.has(w.kind);
+    if (beat) {
+      z += (big ? 0.16 : 0.055 * w.s) * Math.exp(-tau / (big ? 0.2 : 0.09));      // zoom punch
+      roll += (j % 2 ? 1 : -1) * (big ? 0.06 : 0.032 * w.s) * Math.exp(-tau / 0.14);   // the camera rocks
+    }
+    const amp = (big ? 26 : beat ? 3 + 9 * Math.min(1, w.s) : 2) * Math.exp(-tau / 0.07), wob = Math.cos(tau * 75);
     sx += -w.nx * amp * wob; sy += -w.ny * amp * wob;
   }
-  return { cx, cy, z, sx: sx * (1 - r), sy: sy * (1 - r), reveal: r, ay: ANCHOR[1] - 40 * r };
+  const r = smooth(DUR - REVEAL, DUR - 0.25, t);
+  cx += (MAP.cx - cx) * r; cy += (MAP.cy - cy) * r; z += (MAP.zoom - z) * r;
+  return { cx, cy, z, roll: roll * (1 - 0.7 * r), sx: sx * (1 - r), sy: sy * (1 - r), reveal: r, ay: ANCHOR[1] - 40 * r };
+}
+function toWorld(v) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.translate(ANCHOR[0] + v.sx, v.ay + v.sy); ctx.rotate(v.roll); ctx.scale(v.z, v.z); ctx.translate(-v.cx, -v.cy);
 }
 
-function drawBackground(t, j, v) {
-  const e = B.envelope[Math.min(B.envelope.length - 1, Math.round(t * FPS))] || 0;
+// ---------- world ----------
+function drawBackground(t, j) {
+  const bass = at60(B.bass, t), e = at60(B.envelope, t);
   ctx.fillStyle = '#05040a'; ctx.fillRect(0, 0, W, H);
   const hue = j < DROP_INDEX ? 255 : hueAt(j);
   const g = ctx.createRadialGradient(ANCHOR[0], ANCHOR[1], 50, ANCHOR[0], ANCHOR[1], 1300);
-  g.addColorStop(0, hsla(hue, 70, 22, j < DROP_INDEX ? 0.3 : 0.25 + 0.35 * e)); g.addColorStop(1, 'rgba(5,4,10,0)');
+  g.addColorStop(0, hsla(hue, 75, 20 + 14 * bass, j < DROP_INDEX ? 0.3 : 0.25 + 0.3 * e + 0.3 * bass)); g.addColorStop(1, 'rgba(5,4,10,0)');
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-  // world grid, so the motion reads even between walls
-  const step = 100 * v.z, ox = (ANCHOR[0] - v.cx * v.z + v.sx) % step, oy = (v.ay - v.cy * v.z + v.sy) % step;
-  ctx.strokeStyle = `rgba(255,255,255,${0.035 + 0.05 * e})`; ctx.lineWidth = 1;
+}
+function drawGrid(t, v) {
+  const bass = at60(B.bass, t), R = (Math.hypot(W, H) / 2 + 120) / v.z, step = 100;
+  ctx.strokeStyle = `rgba(255,255,255,${0.035 + 0.07 * bass})`; ctx.lineWidth = 1.2 / v.z;
   ctx.beginPath();
-  for (let x = ox; x < W; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
-  for (let y = oy; y < H; y += step) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+  for (let x = Math.floor((v.cx - R) / step) * step; x < v.cx + R; x += step) { ctx.moveTo(x, v.cy - R); ctx.lineTo(x, v.cy + R); }
+  for (let y = Math.floor((v.cy - R) / step) * step; y < v.cy + R; y += step) { ctx.moveTo(v.cx - R, y); ctx.lineTo(v.cx + R, y); }
   ctx.stroke();
+}
+function drawDust(t, v, j) {
+  const bass = at60(B.bass, t), R = (Math.hypot(W, H) / 2 + 60) / v.z;
+  ctx.globalCompositeOperation = 'lighter';
+  for (const d of DUST) {
+    if (Math.abs(d.x - v.cx) > R || Math.abs(d.y - v.cy) > R) continue;
+    const a = (j < DROP_INDEX ? 0.18 : 0.22) + 0.5 * bass;
+    ctx.fillStyle = j < DROP_INDEX ? `rgba(220,215,255,${a})` : hsla((d.hue + 24 * j) % 360, 90, 72, a);
+    ctx.beginPath(); ctx.arc(d.x, d.y, d.r * (1 + 1.6 * bass), 0, TAU); ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over';
 }
 
 const LEAD = 0.9;   // a wall shows up this long before the square reaches it
 function drawWalls(t) {
+  const bass = at60(B.bass, t);
   for (let i = 0; i < WALLS.length; i++) {
     const w = WALLS[i], tau = t - w.t;
     let x = w.cx - w.w / 2, y = w.cy - w.h / 2;
@@ -153,12 +184,11 @@ function drawWalls(t) {
     const k = Math.exp(-tau / 0.12), recoil = 9 * Math.exp(-tau / 0.09) * Math.sin(Math.min(Math.PI, tau * 40));
     x -= w.nx * recoil; y -= w.ny * recoil;
     const fade = 0.55 + 0.45 * Math.exp(-tau / 1.6);
-    ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    ctx.fillStyle = colorOf(i, 60, 0.18 * fade + 0.4 * k);
+    ctx.fillStyle = colorOf(i, 60, 0.16 * fade + 0.4 * k + 0.22 * bass);             // every lit wall throbs with the bass
     ctx.beginPath(); ctx.roundRect(x - 10, y - 10, w.w + 20, w.h + 20, 14); ctx.fill();
-    ctx.restore();
-    ctx.fillStyle = colorOf(i, 62 + 30 * k, fade);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = colorOf(i, 62 + 30 * k + 10 * bass, fade);
     ctx.beginPath(); ctx.roundRect(x, y, w.w, w.h, 6); ctx.fill();
   }
 }
@@ -174,7 +204,7 @@ function drawTrail(t, v) {
     }
   }
   // the comet tail: one stroke per straight run, fading along its length
-  const span = 0.85, from = Math.max(0, t - span);
+  const span = 0.7, from = Math.max(0, t - span);
   const i0 = Math.max(0, lastAtOrBefore(SEGS, from, s => s.t0)), i1 = Math.max(0, lastAtOrBefore(SEGS, t, s => s.t0));
   for (let i = i0; i <= i1; i++) {
     const s = SEGS[i], a = Math.max(from, s.t0), b = Math.min(t, s.t1);
@@ -187,16 +217,24 @@ function drawTrail(t, v) {
   }
 }
 
+// an outline of the square left where it hit, swelling and fading
+function drawStamps(t) {
+  for (let j = hitIndex(t); j >= 0 && t - WALLS[j].t < 0.45; j--) {
+    const w = WALLS[j], k = (t - w.t) / 0.45, [x, y] = pos(w.t), s = HALF * (1 + 1.1 * easeOut(k));
+    ctx.strokeStyle = colorOf(j, 75, 0.75 * (1 - k)); ctx.lineWidth = 4 * (1 - k) + 1;
+    ctx.beginPath(); ctx.roundRect(x - s, y - s, 2 * s, 2 * s, 10); ctx.stroke();
+  }
+}
+
 function drawSparks(t) {
   ctx.globalCompositeOperation = 'lighter';
   for (let j = hitIndex(t); j >= 0 && t - WALLS[j].t < 1.2; j--) {
-    const w = WALLS[j], tau = t - w.t;
-    // shock ring at the point of contact
-    const ringLife = w.kind === 'drop' ? 0.7 : 0.35;
+    const w = WALLS[j], tau = t - w.t, big = BIG.has(w.kind);
+    const ringLife = big ? 0.7 : 0.35;
     if (tau < ringLife) {
       const k = tau / ringLife, px = w.cx - w.nx * (w.w / 2), py = w.cy - w.ny * (w.h / 2);
-      ctx.strokeStyle = colorOf(j, 80, 0.8 * (1 - k)); ctx.lineWidth = (w.kind === 'drop' ? 18 : 6) * (1 - k) + 1;
-      ctx.beginPath(); ctx.arc(px, py, 10 + (w.kind === 'drop' ? 700 : 60 + 60 * Math.min(1, w.s)) * easeOut(k), 0, TAU); ctx.stroke();
+      ctx.strokeStyle = colorOf(j, 80, 0.8 * (1 - k)); ctx.lineWidth = (big ? 18 : 6) * (1 - k) + 1;
+      ctx.beginPath(); ctx.arc(px, py, 10 + (big ? 700 : 50 + 70 * Math.min(1, w.s)) * easeOut(k), 0, TAU); ctx.stroke();
     }
     for (const p of SPARKS[j]) {
       if (tau > p.life) continue;
@@ -209,24 +247,32 @@ function drawSparks(t) {
 }
 
 function drawSquare(t, j, v) {
+  const c = Math.max(0, j);
+  // afterimages a few milliseconds behind: motion blur you can see
+  for (let m = 3; m >= 1; m--) {
+    const [gx, gy] = pos(Math.max(0, t - 0.022 * m));
+    ctx.fillStyle = colorOf(c, 70, 0.22 / m);
+    ctx.beginPath(); ctx.roundRect(gx - HALF, gy - HALF, 2 * HALF, 2 * HALF, 11); ctx.fill();
+  }
   const [x, y] = pos(t);
   let sx = 1, sy = 1;
   if (j >= 0) {
-    const w = WALLS[j], k = Math.exp(-(t - w.t) / 0.07) * (w.kind === 'drop' ? 1.3 : 0.6 + 0.4 * Math.min(1, w.s));
+    const w = WALLS[j], k = Math.exp(-(t - w.t) / 0.07) * (BIG.has(w.kind) ? 1.3 : 0.6 + 0.4 * Math.min(1, w.s));
     const along = 1 - 0.38 * k, across = 1 + 0.26 * k;
     if (w.nx) { sx = along; sy = across; } else { sx = across; sy = along; }
   }
-  const glowR = HALF * 3.4 / Math.max(0.5, v.z);
+  const bass = at60(B.bass, t), glowR = HALF * (3.2 + 1.4 * bass) / Math.max(0.5, v.z);
   const halo = ctx.createRadialGradient(x, y, HALF * 0.6, x, y, glowR);
-  halo.addColorStop(0, colorOf(Math.max(0, j), 62, 0.6)); halo.addColorStop(1, colorOf(Math.max(0, j), 62, 0));
+  halo.addColorStop(0, colorOf(c, 62, 0.65)); halo.addColorStop(1, colorOf(c, 62, 0));
   ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(x, y, glowR, 0, TAU); ctx.fill();
   ctx.save(); ctx.translate(x, y); ctx.scale(sx, sy);
   ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.roundRect(-HALF, -HALF, 2 * HALF, 2 * HALF, 11); ctx.fill();
-  ctx.strokeStyle = colorOf(Math.max(0, j), 60, 1); ctx.lineWidth = 6;
+  ctx.strokeStyle = colorOf(c, 60, 1); ctx.lineWidth = 6;
   ctx.beginPath(); ctx.roundRect(-HALF + 3, -HALF + 3, 2 * HALF - 6, 2 * HALF - 6, 9); ctx.stroke();
   ctx.restore();
 }
 
+// ---------- titles ----------
 function label(str, x, y, size, color, weight = 900, maxW = 960) {
   ctx.font = `${weight} ${size}px ${FONT}`;
   const w = ctx.measureText(str).width;
@@ -236,13 +282,72 @@ function label(str, x, y, size, color, weight = 900, maxW = 960) {
   ctx.fillStyle = color; ctx.fillText(str, x, y);
 }
 function drawText(t, j, v) {
-  const dk = t - T_DROP, bump = dk >= 0 ? 1 + 0.12 * Math.exp(-dk / 0.18) : 1;
-  ctx.save(); ctx.translate(540, 248); ctx.scale(bump, bump);
+  // the title jumps on every beat and leans the other way each time
+  let bump = 1, tilt = 0;
+  for (let i = j; i >= 0 && t - WALLS[i].t < 0.4; i--) {
+    const w = WALLS[i], tau = t - w.t;
+    if (!BEATLIKE.has(w.kind)) continue;
+    const big = BIG.has(w.kind);
+    bump += (big ? 0.16 : 0.07 * w.s) * Math.exp(-tau / 0.1);
+    tilt += (i % 2 ? 1 : -1) * (big ? 0.05 : 0.025 * w.s) * Math.exp(-tau / 0.12);
+  }
+  ctx.save(); ctx.translate(540, 248); ctx.rotate(tilt); ctx.scale(bump, bump);
   label('ПОПАДАЕТ В КАЖДЫЙ БИТ', 0, 0, 104, '#ffffff');
   ctx.restore();
-  const sub = v.reveal > 0.35 ? 'так выглядит этот бит' : 'включи звук';
+  const sub = v.reveal > 0.35 ? 'так выглядит этот бит' : 'звук на максимум';
   const color = j < DROP_INDEX ? '#d9d4ff' : hsla(hueAt(j), 100, 80, 1);
-  label(sub, 540, 338, 56, color, 800, 900);
+  ctx.save(); ctx.translate(540, 338); ctx.rotate(-tilt * 0.6); ctx.scale(1 + (bump - 1) * 0.6, 1 + (bump - 1) * 0.6);
+  label(sub, 0, 0, 56, color, 800, 900);
+  ctx.restore();
+}
+
+// ---------- edit effects on the finished frame ----------
+function effects(t, v) {
+  let split = 0, glitch = 0, invert = false, seed = 0;
+  for (let j = hitIndex(t); j >= 0 && t - WALLS[j].t < 0.4; j--) {
+    const w = WALLS[j], tau = t - w.t;
+    if (BIG.has(w.kind)) {
+      split = Math.max(split, 30 * Math.exp(-tau / 0.12));
+      if (tau < 0.16) { glitch = Math.max(glitch, 1 - tau / 0.16); seed = j; }
+      if (tau < 0.034) invert = true;                      // two negative frames on the crash
+    } else if (w.kind === 'accent' || w.kind === 'downbeat') {
+      split = Math.max(split, 14 * Math.min(1, w.s) * Math.exp(-tau / 0.06));
+      if (w.kind === 'accent' && tau < 0.08) { glitch = Math.max(glitch, 0.6 * (1 - tau / 0.08)); seed = j; }
+    } else if (w.kind === 'beat') {
+      split = Math.max(split, 6 * w.s * Math.exp(-tau / 0.045));
+    }
+  }
+  split *= 1 - 0.6 * v.reveal;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (invert) {
+    ctx.globalCompositeOperation = 'difference'; ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  if (split > 1.2) {
+    // pull the colour channels apart: red one way, blue the other
+    const s = FX.src.getContext('2d');
+    s.globalCompositeOperation = 'copy'; s.drawImage(cv, 0, 0);
+    for (const [c, col] of [[FX.r, '#ff0000'], [FX.g, '#00ff00'], [FX.b, '#0000ff']]) {
+      const g = c.getContext('2d');
+      g.globalCompositeOperation = 'copy'; g.drawImage(FX.src, 0, 0);
+      g.globalCompositeOperation = 'multiply'; g.fillStyle = col; g.fillRect(0, 0, W, H);
+    }
+    ctx.globalCompositeOperation = 'copy'; ctx.drawImage(FX.g, 0, 0);
+    ctx.globalCompositeOperation = 'lighter';
+    // the shifted channels are drawn slightly enlarged so they still cover the edges of the frame
+    const sc = 1 + 2.2 * split / W, ww = W * sc, hh = H * sc;
+    ctx.drawImage(FX.r, (W - ww) / 2 - split, (H - hh) / 2 - split * 0.3, ww, hh);
+    ctx.drawImage(FX.b, (W - ww) / 2 + split, (H - hh) / 2 + split * 0.3, ww, hh);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  if (glitch > 0.05) {
+    // tear a few horizontal bands sideways, different bands every frame
+    const rng = mulberry32(seed * 977 + Math.round(t * FPS));
+    for (let i = 0; i < 9; i++) {
+      const y = rng() * H, h = 8 + rng() * 80, dx = (rng() * 2 - 1) * 110 * glitch;
+      ctx.drawImage(cv, 0, y, W, h, dx, y, W, h);
+    }
+  }
 }
 
 // ---------- ad badge, lower-left: clear of TikTok's caption and its buttons ----------
@@ -285,20 +390,23 @@ function drawAd(t) {
 function drawFrame(t) {
   const j = hitIndex(t), v = view(t);
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
-  drawBackground(t, j, v);
-  ctx.setTransform(v.z, 0, 0, v.z, ANCHOR[0] - v.cx * v.z + v.sx, v.ay - v.cy * v.z + v.sy);
+  drawBackground(t, j);
+  toWorld(v);
+  drawGrid(t, v);
+  drawDust(t, v, j);
   drawWalls(t);
   drawTrail(t, v);
+  drawStamps(t);
   drawSparks(t);
   drawSquare(t, j, v);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  // flash on the hardest hits
-  if (j >= 0) {
+  if (j >= 0) {   // white flash on the hardest hits
     const w = WALLS[j], tau = t - w.t;
-    const a = w.kind === 'drop' ? 0.32 * Math.exp(-tau / 0.12) : w.s >= 0.95 ? 0.07 * Math.exp(-tau / 0.06) : 0;
+    const a = BIG.has(w.kind) ? 0.32 * Math.exp(-tau / 0.12) : w.s >= 0.95 ? 0.07 * Math.exp(-tau / 0.06) : 0;
     if (a > 0.004) { ctx.fillStyle = `rgba(255,255,255,${a})`; ctx.fillRect(0, 0, W, H); }
   }
   drawText(t, j, v);
+  effects(t, v);
   drawAd(t);
   ctx.drawImage(grain, 0, 0);
 }

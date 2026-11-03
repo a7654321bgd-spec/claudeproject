@@ -19,6 +19,7 @@ const beats = JSON.parse(fs.readFileSync(path.resolve(__dirname, opt('--beats', 
 const out = path.resolve(__dirname, opt('--out', 'beat-bounce.mp4'));
 const track = opt('--track', null);
 const AD = { title: opt('--ad-title', 'Domino Team'), sub: opt('--ad-sub', '@dtlinkk_bot') };
+const TITLE = opt('--title', null), REVEAL_TEXT = opt('--reveal', null);   // headline and the pull-back caption
 
 function ffmpeg(argv) {
   const r = spawnSync('ffmpeg', argv, { encoding: 'utf8' });
@@ -41,7 +42,8 @@ function truePeak(wav) {
   page.on('pageerror', e => { console.error('page error:', e.message); process.exit(1); });
   await page.goto('file://' + path.join(__dirname, 'render.html'));
   if (!(await page.evaluate(() => window.ready)).font) throw new Error('Inter Display is not available to Chromium');
-  const info = await page.evaluate(([b, pl, ad]) => window.setup({ beats: b, plan: pl, ad }), [beats, p, AD]);
+  const info = await page.evaluate(([b, pl, ad, title, reveal]) => window.setup({ beats: b, plan: pl, ad, title, reveal }),
+    [beats, p, AD, TITLE, REVEAL_TEXT]);
   console.log('video', JSON.stringify(info));
   const still = async (t, file, type) => {
     const b64 = await page.evaluate(([t, type]) => type === 'png' ? window.framePNG(t) : window.frameJPEG(t), [t, type]);

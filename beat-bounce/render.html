@@ -51,7 +51,7 @@ const grain = layer();
   g.putImageData(id, 0, 0);
 }
 
-let B, PLAN, AD, DUR, T_DROP, WALLS, SEGS, CAM, MAP, SPARKS, HALF, DUST, DROP_INDEX = 0;
+let TITLE, REVEAL_TEXT, B, PLAN, AD, DUR, T_DROP, WALLS, SEGS, CAM, MAP, SPARKS, HALF, DUST, DROP_INDEX = 0;
 
 // colour of the square after hit j: grey before the drop, then round the rainbow, one step per hit
 const hueAt = j => (330 + 24 * Math.max(0, j - DROP_INDEX)) % 360;
@@ -67,6 +67,7 @@ const hitIndex = t => lastAtOrBefore(WALLS, t, w => w.t);
 
 function setup(data) {
   B = data.beats; PLAN = data.plan; AD = data.ad || null;
+  TITLE = data.title || 'ПОПАДАЕТ В КАЖДЫЙ БИТ'; REVEAL_TEXT = data.reveal || 'так выглядит этот бит';
   DUR = Math.floor(B.duration * FPS) / FPS;
   WALLS = PLAN.walls; SEGS = PLAN.segs; HALF = PLAN.half;
   DROP_INDEX = WALLS.findIndex(w => w.kind === 'drop');
@@ -292,9 +293,9 @@ function drawText(t, j, v) {
     tilt += (i % 2 ? 1 : -1) * (big ? 0.05 : 0.025 * w.s) * Math.exp(-tau / 0.12);
   }
   ctx.save(); ctx.translate(540, 248); ctx.rotate(tilt); ctx.scale(bump, bump);
-  label('ПОПАДАЕТ В КАЖДЫЙ БИТ', 0, 0, 104, '#ffffff');
+  label(TITLE, 0, 0, 104, '#ffffff');
   ctx.restore();
-  const sub = v.reveal > 0.35 ? 'так выглядит этот бит' : 'звук на максимум';
+  const sub = v.reveal > 0.35 ? REVEAL_TEXT : 'звук на максимум';
   const color = j < DROP_INDEX ? '#d9d4ff' : hsla(hueAt(j), 100, 80, 1);
   ctx.save(); ctx.translate(540, 338); ctx.rotate(-tilt * 0.6); ctx.scale(1 + (bump - 1) * 0.6, 1 + (bump - 1) * 0.6);
   label(sub, 0, 0, 56, color, 800, 900);

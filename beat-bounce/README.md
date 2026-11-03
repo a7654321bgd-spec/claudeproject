@@ -17,6 +17,7 @@
 | madk1d & VILLIAN — «8 миля» (`8mile.json`) | 49,99–78,79 с: два такта без баса и 16 тактов после его возвращения | 112 | 28,8 с |
 | Индия, Xcho, МОТ — «Шадэ» (Index-1 Radio Edit) (`shade.json`) | 16,84–49,34 с: два такта до возвращения баса и 16 после; хэты сплошные, поэтому удары только до восьмых | 127 | 32,5 с |
 | Kai Angel — «Andy Warhol» (`andy.json`) | 28,34–60,97 с: такт до припева и 16 тактов припева | 139 | 32,63 с |
+| Toxi$ (`toxis.json`, удары по словам `toxis-vocal.json`) | 33,29–61,11 с: такт до первого громкого блока и 16 тактов блока | 72 | 27,82 с |
 
 В «Jealous» отскок приходится на каждое слово отсчёта, перед припевом идёт дробь шестнадцатыми. Петля сходится сама: после обрыва «души ме…» снова начинается отсчёт.
 
@@ -68,6 +69,13 @@ node build.js --beats andy.json --track andy-warhol.mp3 --out beat-bounce-andy.m
 python3 separate.py andy-warhol.mp3 --start 28.34 --dur 32.64 --model Kim_Vocal_2.onnx --out andy-vocals.wav
 python3 vocal_hits.py andy-warhol.mp3 andy.json --vocals andy-vocals.wav --rise-db 9 --min-gap 0.12 --out andy-vocal.json
 node build.js --beats andy-vocal.json --track andy-warhol.mp3 --out beat-bounce-andy-words.mp4 --seed 11 --bound 1600,2000 \
+  --title "ПОПАДАЕТ В КАЖДОЕ СЛОВО" --reveal "так выглядит этот припев"
+
+# Toxi$: удары по словам; подача тянущаяся, поэтому порог подъёма мягче (6 dB)
+python3 analyze.py toxis.mp3 --out toxis.json --drop 34.929 --before 1 --after 16
+python3 separate.py toxis.mp3 --start 33.2926 --dur 27.8187 --model Kim_Vocal_2.onnx --out toxis-vocals.wav
+python3 vocal_hits.py toxis.mp3 toxis.json --vocals toxis-vocals.wav --rise-db 6 --min-gap 0.12 --out toxis-vocal.json
+node build.js --beats toxis-vocal.json --track toxis.mp3 --out beat-bounce-toxis-words.mp4 --seed 11 \
   --title "ПОПАДАЕТ В КАЖДОЕ СЛОВО" --reveal "так выглядит этот припев"
 
 node build.js --preview 0,3.1,15                                # PNG-кадры в preview/, трек не нужен

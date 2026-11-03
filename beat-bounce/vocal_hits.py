@@ -66,10 +66,43 @@ def syllable_onsets(x, min_gap, sensitivity):
     return [(float(t[i]), float(min(1.0, s))) for i, s in zip(out, strength)]
 
 
-def main(track, beats_path, out, min_gap, sensitivity):
+def stem_onsets(path, min_gap, rise_db):
+    """Word and syllable starts in a separated vocal stem (separate.py): the voice's level jumps
+    by at least rise_db from the dip just before to the peak just after."""
+    import wave
+    w = wave.open(path)
+    sr = w.getframerate()
+    v = np.frombuffer(w.readframes(w.getnframes()), np.int16).reshape(-1, w.getnchannels()).mean(axis=1) / 32768
+    hop = sr // 200                                      # 5 ms
+    env = np.array([np.sqrt(np.mean(v[i:i + 2 * hop] ** 2)) for i in range(0, len(v) - 2 * hop, hop)])
+    db = 20 * np.log10(env + 1e-6)
+    floor = np.percentile(db, 95) - 28                   # quieter than this is not singing
+    d = np.diff(np.convolve(db, np.ones(3) / 3, 'same'), prepend=db[0])
+    cand = []
+    for i in range(2, len(db) - 12):
+        if d[i] <= 0 or d[i] < d[i - 1] or d[i] < d[i + 1]:
+            continue
+        before, after = db[max(0, i - 16): i].min(), db[i: i + 12].max()
+        if after > floor and after - before >= rise_db:
+            j = i - 16 + int(np.argmin(db[max(0, i - 16): i])) if i >= 16 else int(np.argmin(db[:i]))
+            k = j + int(np.argmax(np.diff(db[j: i + 12]))) + 1   # steepest point of the rise
+            cand.append((k * hop / sr + hop / sr, after - before))
+    out = []
+    for tt, rise in sorted(cand, key=lambda c: -c[1]):
+        if all(abs(tt - o[0]) >= min_gap for o in out):
+            out.append((tt, rise))
+    out.sort()
+    top = np.percentile([r for _, r in out], 90) if out else 1
+    return [(tt, min(1.0, r / top)) for tt, r in out]
+
+
+def main(track, beats_path, out, min_gap, sensitivity, vocals=None, rise_db=6.0):
     d = json.load(open(beats_path))
-    x = decode(track, d['start'], d['duration'])
-    hits = syllable_onsets(x, min_gap, sensitivity)
+    if vocals:
+        hits = stem_onsets(vocals, min_gap, rise_db)
+    else:
+        x = decode(track, d['start'], d['duration'])
+        hits = syllable_onsets(x, min_gap, sensitivity)
     drop_t = d['drop'] - d['start']
     events = [{'t': 0.0, 's': 1.0, 'kind': 'start'}]
     # the first syllable at or after the drop takes the drop's fireworks
@@ -96,5 +129,7 @@ if __name__ == '__main__':
     ap.add_argument('--out', required=True)
     ap.add_argument('--min-gap', type=float, default=0.14, help='seconds; closer syllables merge into one hit')
     ap.add_argument('--sensitivity', type=float, default=1.6, help='how far above the running median a rise must go')
+    ap.add_argument('--vocals', help='a separated vocal stem of the clip (separate.py); much more exact')
+    ap.add_argument('--rise-db', type=float, default=6.0, help='with --vocals: how sharp a jump counts as a new word')
     a = ap.parse_args()
-    main(a.track, a.beats, a.out, a.min_gap, a.sensitivity)
+    main(a.track, a.beats, a.out, a.min_gap, a.sensitivity, a.vocals, a.rise_db)

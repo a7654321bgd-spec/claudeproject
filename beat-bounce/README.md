@@ -63,8 +63,10 @@ node build.js --beats shade.json --track шадэ.mp3 --out beat-bounce-shade.mp
 python3 analyze.py andy-warhol.mp3 --out andy.json --drop 30.266 --before 1 --after 16
 node build.js --beats andy.json --track andy-warhol.mp3 --out beat-bounce-andy.mp4 --seed 7 --bound 1600,2000
 
-# «Andy Warhol», удары по словам: начала слогов вместо барабанов (vocal_hits.py, без распознавания речи)
-python3 vocal_hits.py andy-warhol.mp3 andy.json --out andy-vocal.json --sensitivity 1.15
+# «Andy Warhol», удары по словам: голос отделяется моделью MDX-Net (Kim_Vocal_2.onnx из релизов
+# github.com/TRvlvr/model_repo, pip install onnxruntime), удар — где голос резко поднимается из провала
+python3 separate.py andy-warhol.mp3 --start 28.34 --dur 32.64 --model Kim_Vocal_2.onnx --out andy-vocals.wav
+python3 vocal_hits.py andy-warhol.mp3 andy.json --vocals andy-vocals.wav --rise-db 9 --min-gap 0.12 --out andy-vocal.json
 node build.js --beats andy-vocal.json --track andy-warhol.mp3 --out beat-bounce-andy-words.mp4 --seed 11 --bound 1600,2000 \
   --title "ПОПАДАЕТ В КАЖДОЕ СЛОВО" --reveal "так выглядит этот припев"
 
@@ -77,7 +79,8 @@ node build.js --track трек.mp3 --ad-title "Domino Team" --ad-sub "@dtlinkk_b
 | `analyze.py` | Ищет сетку битов (155,07 BPM) по спектральному потоку и уточняет её усреднением атак по всем долям. Дроп находит по удару тарелки. Удары между долями отбирает по силе атаки относительно долей того же такта, во второй половине порог мягче. Пишет `beats.json` |
 | `beats.json` | Время и сила каждого удара, огибающие громкости и баса. Самого звука в файле нет |
 | `bounce.js` | Планирует путь: диагональный полёт с постоянной скоростью, стенка в момент каждого удара, на быстрых сериях стенки короче. Поиск с возвратом следит, чтобы квадрат не пролетал сквозь стенки и путь оставался компактным |
-| `vocal_hits.py` | Удары по словам: разделяет звук на тональную и ударную части, в голосовой полосе ищет начала слогов |
+| `separate.py` | Отделяет голос от музыки моделью MDX-Net (ONNX) |
+| `vocal_hits.py` | Удары по словам: начала слов и слогов в отделённом голосе (или, без него, грубо по тональной части микса) |
 | `render.html` | Отрисовка кадров на canvas и эффекты монтажа: зум-панчи, наклон камеры, RGB, глитч, негатив |
 | `build.js` | Сборка: путь, кадры из Chromium, точный вырез фрагмента трека, запас 3 dB по пику, ffmpeg |
 

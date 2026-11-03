@@ -4,3 +4,4 @@ preview/
 # the videos carry copyrighted tracks, so they are delivered directly rather than published here
 *.mp4
 __pycache__/
+*.onnx

@@ -19,6 +19,7 @@
 | Kai Angel — «Andy Warhol» (`andy.json`) | 28,34–60,97 с: такт до припева и 16 тактов припева | 139 | 32,63 с |
 | Toxi$ (`toxis.json`, удары по словам `toxis-vocal.json`) | 33,29–61,11 с: такт до первого громкого блока и 16 тактов блока | 72 | 27,82 с |
 | ivycraft — «люблю москву но снится london» (`london.json`) | 4,71–36,33 с: два такта до первой сильной доли после вступления и 16 после | 102 | 31,62 с |
+| Егор Крид, OG Buda, Toxi$, Мэйби Бэйби, Baby Cute, Дора, madk1d, тёмный принц — «Malo 2.0» (`malo.json`) | 11,55–44,78 с: два такта тихого вступления и 16 тактов с момента, как заходит бит | 152 | 33,22 с |
 
 В «Jealous» отскок приходится на каждое слово отсчёта, перед припевом идёт дробь шестнадцатыми. Петля сходится сама: после обрыва «души ме…» снова начинается отсчёт.
 
@@ -82,6 +83,10 @@ node build.js --beats toxis-vocal.json --track toxis.mp3 --out beat-bounce-toxis
 # ivycraft: дроп находится сам (8,22 с)
 python3 analyze.py london.m4a --out london.json
 node build.js --beats london.json --track london.m4a --out beat-bounce-london.mp4 --seed 11 --bound 1600,2000
+
+# «Malo 2.0»: дроп — сильная доля 15,24 с, где после вступления заходит бит
+python3 analyze.py malo.mp3 --out malo.json --drop 15.239
+node build.js --beats malo.json --track malo.mp3 --out beat-bounce-malo.mp4 --seed 11 --bound 1600,2000
 
 node build.js --preview 0,3.1,15                                # PNG-кадры в preview/, трек не нужен
 node build.js --track трек.mp3 --ad-title "Domino Team" --ad-sub "@dtlinkk_bot"

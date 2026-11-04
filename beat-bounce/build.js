@@ -5,7 +5,7 @@
 //   node build.js --beats jealous.json --track jealous.mp3 --out beat-bounce-jealous.mp4 --seed 7 --bound 1600,2000
 //                                                   (--seed and --bound steer the path planner, see bounce.js)
 //   node build.js --preview 0,3.1,12               → PNG stills in preview/, no track needed
-//   --ad-title "Domino Team" --ad-sub "@dtlinkk_bot"   the ad badge in the lower-left corner
+//   --ad-q "Хочешь найти альтушку?" --ad-title "Domino Team" --ad-sub "@dtlinkk_bot"   the ad card at the bottom
 'use strict';
 const { chromium } = require('playwright');
 const { spawn, spawnSync } = require('child_process');
@@ -18,7 +18,7 @@ const opt = (name, fallback) => { const i = args.indexOf(name); return i >= 0 ? 
 const beats = JSON.parse(fs.readFileSync(path.resolve(__dirname, opt('--beats', 'beats.json')), 'utf8'));
 const out = path.resolve(__dirname, opt('--out', 'beat-bounce.mp4'));
 const track = opt('--track', null);
-const AD = { title: opt('--ad-title', 'Domino Team'), sub: opt('--ad-sub', '@dtlinkk_bot') };
+const AD = { q: opt('--ad-q', 'Хочешь найти альтушку?'), title: opt('--ad-title', 'Domino Team'), sub: opt('--ad-sub', '@dtlinkk_bot') };
 const TITLE = opt('--title', null), REVEAL_TEXT = opt('--reveal', null);   // headline and the pull-back caption
 
 function ffmpeg(argv) {

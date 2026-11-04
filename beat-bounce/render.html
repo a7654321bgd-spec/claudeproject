@@ -23,6 +23,7 @@ const BEATLIKE = new Set(['start', 'beat', 'downbeat', 'accent', 'drop', 'impact
 const clamp01 = x => x < 0 ? 0 : x > 1 ? 1 : x;
 const smooth = (a, b, x) => { const k = clamp01((x - a) / (b - a)); return k * k * (3 - 2 * k); };
 const easeOut = x => 1 - Math.pow(1 - clamp01(x), 3);
+const easeOutBack = x => { x = clamp01(x); const c = 1.8; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
 const hsla = (h, s, l, a) => `hsla(${h},${s}%,${l}%,${a})`;
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -362,30 +363,77 @@ function drawDomino(x, y, w, h) {
   pips(y + h / 4, [[-1, -1], [0, 0], [1, 1]]);
   pips(y + 3 * h / 4, [[-1, -1], [1, -1], [0, 0], [-1, 1], [1, 1]]);
 }
+// The ad: a small corner badge for the first half, then on the first strong beat after the middle it
+// springs open into a big neon card that throbs on the beat. Kept clear of TikTok's buttons on the right.
+let AD_OPEN = null;
+function adOpenTime() {
+  if (AD_OPEN === null) {
+    const w = WALLS.find(w => w.t >= DUR / 2 && (w.kind === 'downbeat' || BIG.has(w.kind))) || WALLS.find(w => w.t >= DUR / 2);
+    AD_OPEN = w ? w.t : DUR / 2;
+  }
+  return AD_OPEN;
+}
 function drawAd(t) {
   if (!AD) return;
-  const x = 36, pad = 20, icon = 34, gap = 18, label1 = 'РЕКЛАМА · TELEGRAM-БОТ';
-  ctx.font = `700 15px ${FONT}`; ctx.letterSpacing = '1.5px'; const lw = ctx.measureText(label1).width; ctx.letterSpacing = '0px';
-  ctx.font = `900 40px ${FONT}`; const tw = ctx.measureText(AD.title).width;
-  ctx.font = `800 24px ${FONT}`; const sw = ctx.measureText(AD.sub).width;
-  const w = pad * 2 + icon + gap + Math.max(lw, tw, sw), h = 110, y = 1504 - h;
-  ctx.fillStyle = 'rgba(10,10,22,0.82)'; ctx.beginPath(); ctx.roundRect(x, y, w, h, 18); ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1.5; ctx.stroke();
-  const k = ((t % 6) + 6) % 6 / 1.2;                    // a light sweep every 6 s
-  if (k < 1) {
-    ctx.save(); ctx.beginPath(); ctx.roundRect(x, y, w, h, 18); ctx.clip();
-    const sx = x - 90 + (w + 180) * k, g = ctx.createLinearGradient(sx - 70, y, sx + 70, y + h);
-    g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.5, 'rgba(255,255,255,0.18)'); g.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = g; ctx.fillRect(x, y, w, h);
+  const k = t < adOpenTime() ? 0 : easeOutBack((t - adOpenTime()) / 0.55);
+  const small = { x: 36, y: 1394, w: 400, h: 110 }, big = { x: 36, y: 1294, w: 900, h: 214 };
+  const lerp = (a, b) => a + (b - a) * k;
+  const x = lerp(small.x, big.x), y = lerp(small.y, big.y), w = lerp(small.w, big.w), h = lerp(small.h, big.h);
+  let bump = 0;
+  for (let j = hitIndex(t); j >= 0 && t - WALLS[j].t < 0.2; j--) {
+    if (BEATLIKE.has(WALLS[j].kind)) bump = Math.max(bump, (BIG.has(WALLS[j].kind) ? 1 : 0.5 * WALLS[j].s) * Math.exp(-(t - WALLS[j].t) / 0.08));
+  }
+  const open = clamp01(k), sc = 1 + 0.035 * bump * open, hue = (t * 60) % 360;
+  ctx.save(); ctx.translate(x + w / 2, y + h / 2); ctx.scale(sc, sc); ctx.translate(-(x + w / 2), -(y + h / 2));
+  ctx.shadowColor = `hsla(${hue},100%,60%,${open * (0.7 + 0.3 * bump)})`; ctx.shadowBlur = open * (34 + 30 * bump);
+  ctx.fillStyle = `rgba(8,6,20,${0.82 + 0.1 * open})`; ctx.beginPath(); ctx.roundRect(x, y, w, h, 18 + 8 * open); ctx.fill();
+  ctx.shadowBlur = 0;
+  if (open > 0) {
+    const g = ctx.createLinearGradient(x, y, x + w, y + h);
+    g.addColorStop(0, `hsl(${hue},100%,62%)`); g.addColorStop(0.5, `hsl(${(hue + 120) % 360},100%,62%)`); g.addColorStop(1, `hsl(${(hue + 240) % 360},100%,62%)`);
+    ctx.globalAlpha = open; ctx.strokeStyle = g; ctx.lineWidth = 5; ctx.stroke(); ctx.globalAlpha = 1;
+  } else {
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1.5; ctx.stroke();
+  }
+  const sweep = ((t % 4) + 4) % 4;                       // a light sweep every 4 s
+  if (sweep < 1) {
+    ctx.save(); ctx.beginPath(); ctx.roundRect(x, y, w, h, 18 + 8 * open); ctx.clip();
+    const sx = x - 120 + (w + 240) * sweep, sg = ctx.createLinearGradient(sx - 90, y, sx + 90, y + h);
+    sg.addColorStop(0, 'rgba(255,255,255,0)'); sg.addColorStop(0.5, 'rgba(255,255,255,0.16)'); sg.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = sg; ctx.fillRect(x, y, w, h);
     ctx.restore();
   }
-  drawDomino(x + pad, y + (h - 62) / 2, icon, 62);
-  const tx = x + pad + icon + gap;
+  const icon = lerp(34, 52), ih = lerp(62, 92), pad = lerp(20, 24);
+  ctx.save(); ctx.translate(x + pad + icon / 2, y + h / 2); ctx.rotate(0.12 * open * Math.sin(t * 3));
+  drawDomino(-icon / 2, -ih / 2, icon, ih); ctx.restore();
+  const tx = x + pad + icon + lerp(18, 26), maxW = x + w - pad - tx;
+  const fit = (str, size, weight) => { ctx.font = `${weight} ${size}px ${FONT}`; const m = ctx.measureText(str).width; return m > maxW ? Math.floor(size * maxW / m) : size; };
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-  ctx.font = `700 15px ${FONT}`; ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.letterSpacing = '1.5px';
-  ctx.fillText(label1, tx, y + 28); ctx.letterSpacing = '0px';
-  ctx.font = `900 40px ${FONT}`; ctx.fillStyle = '#ffffff'; ctx.fillText(AD.title, tx, y + 68);
-  ctx.font = `800 24px ${FONT}`; ctx.fillStyle = '#5ec2ff'; ctx.fillText(AD.sub, tx, y + 97);
+  if (k < 0.5) {
+    // the small badge: name, and where to find it
+    ctx.globalAlpha = 1 - 2 * Math.max(0, k);
+    let fs = fit(AD.title, 40, 900); ctx.font = `900 ${fs}px ${FONT}`; ctx.fillStyle = '#ffffff'; ctx.fillText(AD.title, tx, y + 50);
+    const l2a = 'Discord-канал · ';
+    fs = fit(l2a + AD.sub, 24, 800); ctx.font = `800 ${fs}px ${FONT}`;
+    ctx.fillStyle = '#a5a9ff'; ctx.fillText(l2a, tx, y + 86);
+    ctx.fillStyle = '#5ec2ff'; ctx.fillText(AD.sub, tx + ctx.measureText(l2a).width, y + 86);
+  } else {
+    ctx.globalAlpha = clamp01(2 * k - 1);
+    let fs = fit(AD.q, 56, 900); ctx.font = `900 ${fs}px ${FONT}`;
+    ctx.fillStyle = '#ffffff'; ctx.fillText(AD.q, tx, y + 70);
+    const lead = 'Заходи в Discord-канал ', full = lead + AD.title;
+    fs = fit(full, 46, 900); ctx.font = `900 ${fs}px ${FONT}`;
+    ctx.fillStyle = '#e8e6ff'; ctx.fillText(lead, tx, y + 132);
+    const lw = ctx.measureText(lead).width;
+    ctx.save(); ctx.shadowColor = `hsl(${hue},100%,60%)`; ctx.shadowBlur = 18;
+    ctx.fillStyle = `hsl(${hue},100%,72%)`; ctx.fillText(AD.title, tx + lw, y + 132); ctx.restore();
+    const l3a = 'Ссылка в комментариях или ', l3 = l3a + AD.sub;
+    fs = fit(l3, 32, 800); ctx.font = `800 ${fs}px ${FONT}`;
+    ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.fillText(l3a, tx, y + 184);
+    ctx.fillStyle = '#5ec2ff'; ctx.fillText(AD.sub, tx + ctx.measureText(l3a).width, y + 184);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
 }
 
 function drawFrame(t) {

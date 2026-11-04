@@ -22,6 +22,8 @@
 | Егор Крид, OG Buda, Toxi$, Мэйби Бэйби, Baby Cute, Дора, madk1d, тёмный принц — «Malo 2.0» (`malo.json`) | 11,55–44,78 с: два такта тихого вступления и 16 тактов с момента, как заходит бит | 152 | 33,22 с |
 | Kai Angel & 9mice — «Ice + Alabaster» (`ice.json`) | 9,79–39,21 с: два такта тихого вступления и 16 тактов с взрыва на 13,06 с | 164 | 29,42 с |
 | тёмный принц, tewiq, фортуна 812 — «ПАПА» (`papa.json`) | 28,43–54,61 с: конец паузы без баса и 16 тактов после возвращения баса | 130 | 26,18 с |
+| METAN — «Шнурки» (`shnurki.json`) | 13,12–42,42 с: два такта вступления и 16 тактов с момента, как заходит бит | 126 | 29,3 с |
+| Big Baby Tape feat. Toxi$ — «Ameli» (`ameli.json`) | 22,00–50,27 с: конец тихой части и 16 тактов громкой | 110 | 28,27 с |
 
 В «Jealous» отскок приходится на каждое слово отсчёта, перед припевом идёт дробь шестнадцатыми. Петля сходится сама: после обрыва «души ме…» снова начинается отсчёт.
 
@@ -98,6 +100,12 @@ node build.js --beats ice.json --track ice.m4a --out beat-bounce-ice.mp4 --seed 
 python3 analyze.py papa.m4a --out papa.json --drop 31.35 --finest 8 --bpm 165.16
 node build.js --beats papa.json --track papa.m4a --out beat-bounce-papa.mp4 --seed 11 --bound 1600,2000
 
+# «Шнурки»: дроп находится сам; «Ameli»: вход громкой части на 25,22 с
+python3 analyze.py shnurki.m4a --out shnurki.json
+node build.js --beats shnurki.json --track shnurki.m4a --out beat-bounce-shnurki.mp4 --seed 7 --bound 1900,2400
+python3 analyze.py ameli.m4a --out ameli.json --drop 25.216
+node build.js --beats ameli.json --track ameli.m4a --out beat-bounce-ameli.mp4 --seed 7 --bound 1600,2000
+
 node build.js --preview 0,3.1,15                                # PNG-кадры в preview/, трек не нужен
 node build.js --track трек.mp3 --ad-title "Domino Team" --ad-sub "@dtlinkk_bot"
 ```
@@ -113,3 +121,7 @@ node build.js --track трек.mp3 --ad-title "Domino Team" --ad-sub "@dtlinkk_b
 | `build.js` | Сборка: путь, кадры из Chromium, точный вырез фрагмента трека, запас 3 dB по пику, ffmpeg |
 
 Каждый кадр показывает момент на полкадра вперёд, поэтому удар попадает на кадр, ближайший к звуку. Проверено на дропе: удар тарелки звучит на 3,084 с, вспышка видна на кадре 3,100 с.
+
+## Реклама
+
+Первую половину ролика в левом нижнем углу стоит небольшая плашка: «Domino Team · Discord-канал · @dtlinkk_bot». На первой сильной доле после середины она с отскоком раскрывается в большую неоновую карточку: «Хочешь найти альтушку? Заходи в Discord-канал Domino Team. Ссылка в комментариях или @dtlinkk_bot». Рамка карточки переливается и пульсирует в бит. Текст меняется флагами `--ad-q`, `--ad-title`, `--ad-sub`.

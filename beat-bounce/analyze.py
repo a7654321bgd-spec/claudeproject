@@ -55,7 +55,7 @@ def sync_average(t, env, beats, offs):
     return acc / len(beats)
 
 
-def fit_grid(t, env, t_from, t_to):
+def fit_grid(t, env, t_from, t_to, bpm=None):
     """Tempo from autocorrelation, then period and phase that make the beat-synchronous onset peak sharpest."""
     step = 0.005
     grid = np.arange(t_from, t_to, step)
@@ -64,7 +64,7 @@ def fit_grid(t, env, t_from, t_to):
     ac = np.correlate(e, e, 'full')[len(e) - 1:]
     lags = np.arange(len(ac)) * step
     ok = (lags > 60 / 180) & (lags < 60 / 120)
-    period = lags[ok][np.argmax(ac[ok])]
+    period = lags[ok][np.argmax(ac[ok])] if bpm is None else 60 / bpm   # a known tempo skips the estimate
     best = None
     for p in np.linspace(period * 0.995, period * 1.005, 201):
         for ph in np.arange(0, p, 0.001):
@@ -80,7 +80,7 @@ def fit_grid(t, env, t_from, t_to):
     return p, (t_from + ph) % p
 
 
-def main(path, out='beats.json', drop_hint=None, bars_before=2, bars_after=16, finest=16):
+def main(path, out='beats.json', drop_hint=None, bars_before=2, bars_after=16, finest=16, bpm=None):
     x = decode(path)
     dur = len(x) / SR
     t, env = flux_bands(x)
@@ -96,7 +96,7 @@ def main(path, out='beats.json', drop_hint=None, bars_before=2, bars_after=16, f
     else:
         rise_t = drop_hint
 
-    period, phase = fit_grid(t, env['all'], rise_t, min(dur - 4, rise_t + 80))
+    period, phase = fit_grid(t, env['all'], rise_t, min(dur - 4, rise_t + 80), bpm)
     beat_t = lambda k: phase + k * period
     k_rise = int(round((rise_t - phase) / period))
     peak = lambda e, tt: float(np.max(np.interp(tt + np.arange(-0.01, 0.011, 0.001), t, e)))
@@ -198,5 +198,6 @@ if __name__ == '__main__':
     ap.add_argument('--before', type=int, default=2, help='bars of the clip before the drop')
     ap.add_argument('--after', type=int, default=16, help='bars of the clip from the drop on')
     ap.add_argument('--finest', type=int, default=16, choices=(8, 16), help='shortest note that can be a hit: 8 for busy hi-hats')
+    ap.add_argument('--bpm', type=float, help='the tempo, when the automatic estimate gets it wrong')
     a = ap.parse_args()
-    main(a.track, a.out, a.drop, a.before, a.after, a.finest)
+    main(a.track, a.out, a.drop, a.before, a.after, a.finest, a.bpm)

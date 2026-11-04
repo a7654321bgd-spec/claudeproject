@@ -20,6 +20,8 @@
 | Toxi$ (`toxis.json`, удары по словам `toxis-vocal.json`) | 33,29–61,11 с: такт до первого громкого блока и 16 тактов блока | 72 | 27,82 с |
 | ivycraft — «люблю москву но снится london» (`london.json`) | 4,71–36,33 с: два такта до первой сильной доли после вступления и 16 после | 102 | 31,62 с |
 | Егор Крид, OG Buda, Toxi$, Мэйби Бэйби, Baby Cute, Дора, madk1d, тёмный принц — «Malo 2.0» (`malo.json`) | 11,55–44,78 с: два такта тихого вступления и 16 тактов с момента, как заходит бит | 152 | 33,22 с |
+| Kai Angel & 9mice — «Ice + Alabaster» (`ice.json`) | 9,79–39,21 с: два такта тихого вступления и 16 тактов с взрыва на 13,06 с | 164 | 29,42 с |
+| тёмный принц, tewiq, фортуна 812 — «ПАПА» (`papa.json`) | 28,43–54,61 с: конец паузы без баса и 16 тактов после возвращения баса | 130 | 26,18 с |
 
 В «Jealous» отскок приходится на каждое слово отсчёта, перед припевом идёт дробь шестнадцатыми. Петля сходится сама: после обрыва «души ме…» снова начинается отсчёт.
 
@@ -87,6 +89,14 @@ node build.js --beats london.json --track london.m4a --out beat-bounce-london.mp
 # «Malo 2.0»: дроп — сильная доля 15,24 с, где после вступления заходит бит
 python3 analyze.py malo.mp3 --out malo.json --drop 15.239
 node build.js --beats malo.json --track malo.mp3 --out beat-bounce-malo.mp4 --seed 11 --bound 1600,2000
+
+# «Ice + Alabaster»: взрыв на 13,06 с (громкость −13 → −1 dB)
+python3 analyze.py ice.m4a --out ice.json --drop 13.064
+node build.js --beats ice.json --track ice.m4a --out beat-bounce-ice.mp4 --seed 7 --bound 1600,2000
+
+# «ПАПА»: автоматический темп ошибается (153,6), настоящий ~165 BPM; хэты сплошные — только до восьмых
+python3 analyze.py papa.m4a --out papa.json --drop 31.35 --finest 8 --bpm 165.16
+node build.js --beats papa.json --track papa.m4a --out beat-bounce-papa.mp4 --seed 11 --bound 1600,2000
 
 node build.js --preview 0,3.1,15                                # PNG-кадры в preview/, трек не нужен
 node build.js --track трек.mp3 --ad-title "Domino Team" --ad-sub "@dtlinkk_bot"

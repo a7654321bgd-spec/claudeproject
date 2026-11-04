@@ -18,6 +18,7 @@
 | Индия, Xcho, МОТ — «Шадэ» (Index-1 Radio Edit) (`shade.json`) | 16,84–49,34 с: два такта до возвращения баса и 16 после; хэты сплошные, поэтому удары только до восьмых | 127 | 32,5 с |
 | Kai Angel — «Andy Warhol» (`andy.json`) | 28,34–60,97 с: такт до припева и 16 тактов припева | 139 | 32,63 с |
 | Toxi$ (`toxis.json`, удары по словам `toxis-vocal.json`) | 33,29–61,11 с: такт до первого громкого блока и 16 тактов блока | 72 | 27,82 с |
+| ivycraft — «люблю москву но снится london» (`london.json`) | 4,71–36,33 с: два такта до первой сильной доли после вступления и 16 после | 102 | 31,62 с |
 
 В «Jealous» отскок приходится на каждое слово отсчёта, перед припевом идёт дробь шестнадцатыми. Петля сходится сама: после обрыва «души ме…» снова начинается отсчёт.
 
@@ -77,6 +78,10 @@ python3 separate.py toxis.mp3 --start 33.2926 --dur 27.8187 --model Kim_Vocal_2.
 python3 vocal_hits.py toxis.mp3 toxis.json --vocals toxis-vocals.wav --rise-db 6 --min-gap 0.12 --out toxis-vocal.json
 node build.js --beats toxis-vocal.json --track toxis.mp3 --out beat-bounce-toxis-words.mp4 --seed 11 \
   --title "ПОПАДАЕТ В КАЖДОЕ СЛОВО" --reveal "так выглядит этот припев"
+
+# ivycraft: дроп находится сам (8,22 с)
+python3 analyze.py london.m4a --out london.json
+node build.js --beats london.json --track london.m4a --out beat-bounce-london.mp4 --seed 11 --bound 1600,2000
 
 node build.js --preview 0,3.1,15                                # PNG-кадры в preview/, трек не нужен
 node build.js --track трек.mp3 --ad-title "Domino Team" --ad-sub "@dtlinkk_bot"

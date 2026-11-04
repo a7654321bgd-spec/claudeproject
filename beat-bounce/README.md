@@ -26,6 +26,7 @@
 | Big Baby Tape feat. Toxi$ — «Ameli» (`ameli.json`) | 22,00–50,27 с: конец тихой части и 16 тактов громкой | 110 | 28,27 с |
 | УННВ — «Секрет или тайна» (remix LOT) (`sekret.json`) | 14,25–44,53 с: вступление и 16 тактов с момента, как заходит бит | 106 | 30,27 с |
 | УННВ — «Фрэш» (`fresh.json`) | 7,08–40,83 с: два такта вступления и 16 тактов бита | 95 | 33,75 с |
+| Toxi$ — «I GOT U» (`igotu.json`, удары по словам `igotu-vocal.json`) | 75,02–107,81 с: с 1:15, взрыв тактом позже | 125 | 32,78 с |
 
 В «Jealous» отскок приходится на каждое слово отсчёта, перед припевом идёт дробь шестнадцатыми. Петля сходится сама: после обрыва «души ме…» снова начинается отсчёт.
 
@@ -113,6 +114,13 @@ python3 analyze.py sekret.m4a --out sekret.json --drop 17.613
 node build.js --beats sekret.json --track sekret.m4a --out beat-bounce-sekret.mp4 --seed 7 --bound 1900,2400
 python3 analyze.py fresh.m4a --out fresh.json --drop 10.834
 node build.js --beats fresh.json --track fresh.m4a --out beat-bounce-fresh.mp4 --seed 7 --bound 1900,2400
+
+# «I GOT U»: удары по словам, ролик с 1:15 (доля 75,02 с), взрыв тактом позже
+python3 analyze.py igotu.m4a --out igotu.json --drop 76.955 --before 1 --after 16
+python3 separate.py igotu.m4a --start 75.0243 --dur 32.7852 --model Kim_Vocal_2.onnx --out igotu-vocals.wav
+python3 vocal_hits.py igotu.m4a igotu.json --vocals igotu-vocals.wav --rise-db 9 --min-gap 0.12 --out igotu-vocal.json
+node build.js --beats igotu-vocal.json --track igotu.m4a --out beat-bounce-igotu-words.mp4 --seed 7 --bound 1900,2400 \
+  --title "ПОПАДАЕТ В КАЖДОЕ СЛОВО" --reveal "так выглядит этот куплет"
 
 node build.js --preview 0,3.1,15                                # PNG-кадры в preview/, трек не нужен
 node build.js --track трек.mp3 --ad-title "Domino Team" --ad-sub "@dtlinkk_bot"

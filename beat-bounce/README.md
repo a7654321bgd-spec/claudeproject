@@ -24,6 +24,8 @@
 | тёмный принц, tewiq, фортуна 812 — «ПАПА» (`papa.json`) | 28,43–54,61 с: конец паузы без баса и 16 тактов после возвращения баса | 130 | 26,18 с |
 | METAN — «Шнурки» (`shnurki.json`) | 13,12–42,42 с: два такта вступления и 16 тактов с момента, как заходит бит | 126 | 29,3 с |
 | Big Baby Tape feat. Toxi$ — «Ameli» (`ameli.json`) | 22,00–50,27 с: конец тихой части и 16 тактов громкой | 110 | 28,27 с |
+| УННВ — «Секрет или тайна» (remix LOT) (`sekret.json`) | 14,25–44,53 с: вступление и 16 тактов с момента, как заходит бит | 106 | 30,27 с |
+| УННВ — «Фрэш» (`fresh.json`) | 7,08–40,83 с: два такта вступления и 16 тактов бита | 95 | 33,75 с |
 
 В «Jealous» отскок приходится на каждое слово отсчёта, перед припевом идёт дробь шестнадцатыми. Петля сходится сама: после обрыва «души ме…» снова начинается отсчёт.
 
@@ -106,6 +108,12 @@ node build.js --beats shnurki.json --track shnurki.m4a --out beat-bounce-shnurki
 python3 analyze.py ameli.m4a --out ameli.json --drop 25.216
 node build.js --beats ameli.json --track ameli.m4a --out beat-bounce-ameli.mp4 --seed 7 --bound 1600,2000
 
+# УННВ: бит заходит на 17,61 с («Секрет или тайна», remix LOT) и на 10,83 с («Фрэш»)
+python3 analyze.py sekret.m4a --out sekret.json --drop 17.613
+node build.js --beats sekret.json --track sekret.m4a --out beat-bounce-sekret.mp4 --seed 7 --bound 1900,2400
+python3 analyze.py fresh.m4a --out fresh.json --drop 10.834
+node build.js --beats fresh.json --track fresh.m4a --out beat-bounce-fresh.mp4 --seed 7 --bound 1900,2400
+
 node build.js --preview 0,3.1,15                                # PNG-кадры в preview/, трек не нужен
 node build.js --track трек.mp3 --ad-title "Domino Team" --ad-sub "@dtlinkk_bot"
 ```
@@ -124,4 +132,4 @@ node build.js --track трек.mp3 --ad-title "Domino Team" --ad-sub "@dtlinkk_b
 
 ## Реклама
 
-Первую половину ролика в левом нижнем углу стоит небольшая плашка: «Domino Team · Discord-канал · @dtlinkk_bot». На первой сильной доле после середины она с отскоком раскрывается в большую неоновую карточку: «Хочешь найти альтушку? Заходи в Discord-канал Domino Team. Ссылка в комментариях или @dtlinkk_bot». Рамка карточки переливается и пульсирует в бит. Текст меняется флагами `--ad-q`, `--ad-title`, `--ad-sub`.
+Первую половину ролика в левом нижнем углу стоит небольшая плашка: «Domino Team · Discord-канал · @dtlinkk_bot». На первой сильной доле после середины она с отскоком раскрывается в большую неоновую карточку: «Хочешь найти альтушку? Заходи в Discord-канал Domino Team. Ссылка в комментариях или через телеграм бота @dtlinkk_bot». Рамка карточки переливается и пульсирует в бит. Текст меняется флагами `--ad-q`, `--ad-title`, `--ad-sub`.

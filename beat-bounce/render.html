@@ -427,7 +427,7 @@ function drawAd(t) {
     const lw = ctx.measureText(lead).width;
     ctx.save(); ctx.shadowColor = `hsl(${hue},100%,60%)`; ctx.shadowBlur = 18;
     ctx.fillStyle = `hsl(${hue},100%,72%)`; ctx.fillText(AD.title, tx + lw, y + 132); ctx.restore();
-    const l3a = 'Ссылка в комментариях или ', l3 = l3a + AD.sub;
+    const l3a = 'Ссылка в комментариях или через телеграм бота ', l3 = l3a + AD.sub;
     fs = fit(l3, 32, 800); ctx.font = `800 ${fs}px ${FONT}`;
     ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.fillText(l3a, tx, y + 184);
     ctx.fillStyle = '#5ec2ff'; ctx.fillText(AD.sub, tx + ctx.measureText(l3a).width, y + 184);
